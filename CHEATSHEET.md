@@ -35,8 +35,9 @@ For the narrative version see the [README](README.md); for per-command detail in
 
 ## Requirements & global behavior
 
-- **Requires** `bash` + coreutils (`awk`, `sed`, `date`, …) — macOS, Linux, WSL/Git Bash. Everything
-  else is optional and degrades gracefully:
+- **Requires** `bash` + **GNU** coreutils (`awk`, `sed`, and GNU `date` — the timestamps use `date
+  -d`/`%:z`). Linux and WSL/Git Bash have these built in; on macOS, `brew install coreutils` and put
+  them on your `PATH`. Everything else is optional and degrades gracefully:
   - [`glow`](https://github.com/charmbracelet/glow) or [`bat`](https://github.com/sharkdp/bat)
     pretty-render `read` (else a minimal built-in render, else `cat`).
   - [`rg`](https://github.com/BurntSushi/ripgrep) speeds up `search` (else `grep -r`).
@@ -191,12 +192,13 @@ edda list work           # positional shorthand for the same filter
 
 ### `search`
 
-Search note contents across the vault (the `.trash/` is skipped). Uses `rg` when present, else
-`grep -r`. Smart-case; the pattern is a regex.
+Search note contents across the vault (the `.trash/` is skipped). Uses `rg` when present —
+smart-case, and the pattern is a full regex — else falls back to `grep -r`, which is
+**case-sensitive** and uses basic regex (so `|` alternation only works under `rg`).
 
 ```sh
 edda search parser
-edda grep "TODO|FIXME"   # alias; regex
+edda grep "TODO|FIXME"   # alias; the alternation needs rg (the common case)
 ```
 
 A run with no matches prints a dim note and still exits `0` (not an error).
