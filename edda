@@ -1,0 +1,606 @@
+#!/usr/bin/env bash
+# edda — a pocket CLI for your personal vault of markdown notes.
+#
+# The Norse Eddas are the codices where the old myths were finally written down;
+# edda is the tool where *you* write things down. Notes are plain .md files in one
+# flat vault, labelled by frontmatter tags — no folders, no database, no network.
+# It owns exactly one directory (the vault) and never reaches beyond it: every write
+# lands inside $EDDA_VAULT, nothing is ever hard-deleted, and edda never phones home.
+#
+#   edda new <title…>        create a note          edda list [-l label]    list notes
+#   edda edit <note>         open it in $EDITOR      edda search <pattern>   grep the vault
+#   edda add <note> '…'      append a line          edda path <note>        print its path
+#   edda read <note>         render it              edda init               scaffold the vault
+#   edda <note>              (no verb) read it, when a note by that name exists
+#
+#   edda help  ·  edda <command> help   for the menu and per-command detail.
+#
+# Deps: bash + coreutils. glow/bat render 'read' when present (else a plain fallback);
+# rg speeds up 'search' (else grep). All optional — edda degrades gracefully and stays
+# fully offline. Drop it in ~/.local/bin and run it anywhere.
+# shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
+set -uo pipefail
+
+VERSION="0.1.0"
+
+# ── configuration — env  >  config file  >  default vault ─────────────────────
+# The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
+# config (so the environment always wins over the file), source the config if it
+# exists, then resolve env > file > default. The config is a plain sourced shell
+# file that sets EDDA_VAULT=…; 'edda init' writes a starter one.
+CONFIG="${EDDA_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/edda/config}"
+_env_VAULT="${EDDA_VAULT-}"
+# shellcheck source=/dev/null
+[ -f "$CONFIG" ] && . "$CONFIG"
+DEFAULT_VAULT="${XDG_DATA_HOME:-$HOME/.local/share}/edda"
+VAULT="${_env_VAULT:-${EDDA_VAULT:-$DEFAULT_VAULT}}"
+TRASH="$VAULT/.trash"
+
+# ── palette — color only on a TTY, and never when NO_COLOR is set ─────────────
+# Same convention as the rest of the pack: piped/redirected output, or NO_COLOR,
+# collapses every escape to an empty string, so output is plain text downstream.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; C=$'\e[36m'; DIM=$'\e[2m'; BD=$'\e[1m'; X=$'\e[0m'
+else R=; G=; Y=; C=; DIM=; BD=; X=; fi
+
+# ── small helpers ─────────────────────────────────────────────────────────────
+have(){ command -v "$1" >/dev/null 2>&1; }                     # is a tool on PATH?
+is_help(){ case "${1:-}" in help|-h|--help) return 0;; *) return 1;; esac; }
+note(){ printf "    ${DIM}%s${X}\n" "$1"; }                    # a dim aside
+now_iso(){ date +%Y-%m-%dT%H:%M:%S%:z; }                       # ISO-8601 with tz offset
+
+# Compact age of an ISO-8601 timestamp ("3d", "2w"). Companion to muninn's epoch
+# variant, but takes the ISO string the frontmatter actually stores. Prints "?" when
+# the value is missing or unparseable rather than pretending a bogus 1970 age.
+age_short(){
+  local ts now diff
+  ts="$(date -d "${1:-}" +%s 2>/dev/null)" || ts=""
+  [ -z "$ts" ] && { printf '?'; return; }
+  now="$(date +%s)"; diff=$(( now - ts )); [ "$diff" -lt 0 ] && diff=0
+  if   [ "$diff" -lt 3600 ];    then printf '%dm'  $(( diff/60 ))
+  elif [ "$diff" -lt 86400 ];   then printf '%dh'  $(( diff/3600 ))
+  elif [ "$diff" -lt 604800 ];  then printf '%dd'  $(( diff/86400 ))
+  elif [ "$diff" -lt 2592000 ]; then printf '%dw'  $(( diff/604800 ))
+  else                               printf '%dmo' $(( diff/2592000 )); fi
+}
+
+# slugify — turn a human title into the note's filename id. Lowercase, collapse any
+# run of non-[a-z0-9] to a single dash (so punctuation and whitespace fold together,
+# and non-ASCII drops out — an ASCII-only slug policy, on purpose), then trim leading
+# and trailing dashes. Prints nothing for an all-punctuation title; callers must
+# reject an empty slug rather than create a bare ".md".
+slugify(){
+  local s="${1:-}"
+  s="${s,,}"                                             # lowercase (bash 4+)
+  s="$(printf '%s' "$s" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+  printf '%s' "$s"
+}
+
+# note_file <name> — the vault path for a note named <name>. The user types the slug
+# (my-note), but we slugify defensively so 'edda read "My Note"' resolves too. slug
+# and title stay decoupled: this maps name→path only, it never touches the title.
+note_file(){ printf '%s/%s.md' "$VAULT" "$(slugify "$1")"; }
+
+# fm_get <file> <key> — value of a frontmatter key, reading ONLY the leading ---…---
+# block so a body that contains its own '---' rule is never mistaken for frontmatter.
+# Prints nothing when the file has no leading block, or lacks the key.
+fm_get(){
+  awk -v key="$2" '
+    NR==1 && $0!="---" { exit }          # no leading frontmatter block
+    NR==1 { next }                       # opening fence
+    $0=="---" { exit }                   # closing fence — stop before the body
+    {
+      k=$0; sub(/:.*/,"",k)              # key = text before the first colon
+      if (k==key) { v=$0; sub(/^[^:]*:[ \t]*/,"",v); print v; exit }
+    }
+  ' "$1" 2>/dev/null
+}
+
+# fm_set <file> <key> <value> — set a frontmatter key in place, touching ONLY the
+# leading ---…--- block: replaces the key's line if present, else inserts it just
+# before the closing fence. A no-op when there is no leading block. The temp file
+# lives inside the vault, so no write ever escapes it, and the rename is atomic.
+fm_set(){
+  local file="$1" key="$2" val="$3" tmp
+  tmp="$(mktemp "$VAULT/.edda-tmp.XXXXXX")" || return 1
+  awk -v key="$key" -v val="$val" '
+    NR==1 { if ($0=="---") { print; infm=1 } else { print; nofm=1 }; next }
+    nofm { print; next }
+    infm && $0=="---" { if (!done) { print key ": " val; done=1 }; print; infm=0; next }
+    infm {
+      k=$0; sub(/:.*/,"",k)
+      if (k==key && !done) { print key ": " val; done=1; next }
+      print; next
+    }
+    { print }
+  ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+# note_body <file> — the note minus its leading frontmatter block, for rendering.
+note_body(){
+  awk '
+    NR==1 && $0=="---" { infm=1; next }
+    infm && $0=="---" { infm=0; next }
+    !infm { print }
+  ' "$1"
+}
+
+# note_labels <file> — the note's labels as a space-separated, slugified list, so a
+# filter can word-match them. "labels: [work, ideas]" -> "work ideas".
+note_labels(){
+  local raw; raw="$(fm_get "$1" labels)"
+  raw="${raw#[}"; raw="${raw%]}"          # strip the surrounding brackets
+  raw="${raw//,/ }"                        # commas → spaces
+  local -a arr; read -r -a arr <<< "$raw"
+  local out="" w
+  for w in "${arr[@]}"; do out="${out:+$out }$(slugify "$w")"; done
+  printf '%s' "$out"
+}
+
+# open_editor <file> — the delegation chain: $VISUAL → $EDITOR → nano → vi. No
+# bespoke editor; quick capture is 'add's job. $VISUAL/$EDITOR may carry flags
+# (e.g. "code --wait", "emacsclient -t"), so split on whitespace into argv.
+open_editor(){
+  local file="$1" ed
+  ed="${VISUAL:-${EDITOR:-}}"
+  if [ -z "$ed" ]; then if have nano; then ed="nano"; else ed="vi"; fi; fi
+  local -a cmd; read -r -a cmd <<< "$ed"
+  "${cmd[@]}" "$file"
+}
+
+# ensure_vault — every note-touching command runs this first; 'init' does not.
+ensure_vault(){
+  [ -d "$VAULT" ] && return 0
+  printf "\n  ${R}no vault at${X} ${C}%s${X}\n" "$VAULT"
+  note "run ${BD}edda init${X} to create it, or point ${BD}EDDA_VAULT${X} at an existing vault."
+  printf "\n"
+  return 1
+}
+
+# ── init — scaffold the vault (+ .trash for soft-deletes) and a starter config ──
+cmd_init(){
+  is_help "${1:-}" && { help_init; return 0; }
+  local force=0 a
+  for a in "$@"; do case "$a" in
+    -f|--force) force=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+  esac; done
+
+  printf "\n  ${BD}edda init${X}\n\n"
+
+  # 1. the vault, and its .trash/ (where a future 'rm' soft-deletes to — never rm -f)
+  if [ -d "$VAULT" ]; then
+    printf "  ${DIM}·${X} vault already exists → ${C}%s${X}\n" "$VAULT"
+  else
+    mkdir -p "$VAULT" || { printf "  ${R}✗ couldn't create the vault at %s${X}\n\n" "$VAULT"; return 1; }
+    printf "  ${G}✓${X} created vault → ${C}%s${X}\n" "$VAULT"
+  fi
+  mkdir -p "$TRASH"
+
+  # 2. a starter config (a plain sourced shell file; the env still overrides it)
+  if [ -f "$CONFIG" ] && [ "$force" = 0 ]; then
+    printf "  ${DIM}·${X} config already exists → ${C}%s${X} ${DIM}(edda init --force to overwrite)${X}\n" "$CONFIG"
+  else
+    mkdir -p "$(dirname "$CONFIG")"
+    cat > "$CONFIG" <<CFG
+# edda configuration — https://github.com/brett-buskirk/edda
+# A plain sourced shell file. EDDA_VAULT in the environment overrides this.
+EDDA_VAULT="$VAULT"
+CFG
+    printf "  ${G}✓${X} wrote config → ${C}%s${X}\n" "$CONFIG"
+  fi
+
+  printf "\n  ${DIM}vault ready — 'edda new <title>' to write your first note.${X}\n"
+  note "tip: point EDDA_VAULT at a synced/versioned dir — the vault is state worth backing up."
+  printf "\n"
+}
+
+# ── new — create a note with the closed frontmatter schema, then optionally edit ─
+cmd_new(){
+  is_help "${1:-}" && { help_new; return 0; }
+  local edit_after=0 title=""
+  local -a labels=()
+  # Flags come before the title; the first bareword starts the title, and the rest
+  # of the line ($*) is the title verbatim.
+  while [ $# -gt 0 ]; do case "$1" in
+    -e|--edit) edit_after=1; shift;;
+    -l|--label) shift; [ -n "${1:-}" ] && labels+=("$1"); shift;;
+    --) shift; break;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$1"; shift;;
+    *) break;;
+  esac; done
+  title="$*"
+
+  ensure_vault || return 1
+  if [ -z "${title// /}" ]; then
+    printf "\n  ${R}usage:${X} edda new [-l label] <title…>\n\n"; return 1
+  fi
+  local slug; slug="$(slugify "$title")"
+  if [ -z "$slug" ]; then
+    printf "\n  ${R}✗ that title has no slug-able characters${X} ${DIM}(need at least one a–z or 0–9).${X}\n\n"; return 1
+  fi
+  local file="$VAULT/$slug.md"
+  # Collision policy: refuse (never clobber an existing note). Held consistent.
+  if [ -e "$file" ]; then
+    printf "\n  ${Y}a note named${X} ${BD}%s${X} ${Y}already exists${X} ${DIM}→ %s${X}\n" "$slug" "$file"
+    note "edit it with:  edda edit $slug"
+    printf "\n"; return 1
+  fi
+
+  # labels: [a, b] inline — the closed schema, hand-built, no YAML library.
+  local labelstr="[]"
+  if [ "${#labels[@]}" -gt 0 ]; then
+    local j; labelstr="["
+    for j in "${!labels[@]}"; do
+      [ "$j" -gt 0 ] && labelstr+=", "
+      labelstr+="$(slugify "${labels[$j]}")"
+    done
+    labelstr+="]"
+  fi
+
+  local ts; ts="$(now_iso)"
+  {
+    printf '%s\n' '---'
+    printf 'title: %s\n' "$title"
+    printf 'created: %s\n' "$ts"
+    printf 'updated: %s\n' "$ts"
+    printf 'labels: %s\n' "$labelstr"
+    printf '%s\n' '---'
+    printf '\n'
+    printf '# %s\n' "$title"
+  } > "$file"
+
+  printf "\n  ${G}✓ created${X} ${BD}%s${X} ${DIM}→ %s${X}\n" "$slug" "$file"
+  [ "$labelstr" != "[]" ] && printf "    ${DIM}labels %s${X}\n" "$labelstr"
+  printf "\n"
+  [ "$edit_after" = 1 ] && open_editor "$file"
+  return 0
+}
+
+# ── edit — hand the note to the user's editor, then bump 'updated' if it changed ─
+cmd_edit(){
+  is_help "${1:-}" && { help_edit; return 0; }
+  local name="" a
+  for a in "$@"; do case "$a" in
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+    *) [ -z "$name" ] && name="$a";;
+  esac; done
+  ensure_vault || return 1
+  [ -z "$name" ] && { printf "\n  ${R}usage:${X} edda edit <note>\n\n"; return 1; }
+  local file; file="$(note_file "$name")"
+  if [ ! -f "$file" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$(slugify "$name")"
+    note "create it with:  edda new $name"
+    printf "\n"; return 1
+  fi
+
+  local before after
+  before="$(date -r "$file" +%s 2>/dev/null || echo 0)"
+  open_editor "$file"
+  after="$(date -r "$file" +%s 2>/dev/null || echo 0)"
+  # Only bump 'updated' when the file actually changed — don't record an edit that
+  # didn't happen (opened and quit).
+  if [ "$after" != "$before" ]; then
+    fm_set "$file" updated "$(now_iso)"
+    printf "\n  ${G}✓ saved${X} ${BD}%s${X}\n\n" "$(slugify "$name")"
+  else
+    printf "\n  ${DIM}· no changes${X}\n\n"
+  fi
+}
+
+# ── add — append a line; plain by default, a journal bullet with -t, stdin with - ─
+cmd_add(){
+  is_help "${1:-}" && { help_add; return 0; }
+  local stamp=0 name="" from_stdin=0
+  local -a parts=()
+  while [ $# -gt 0 ]; do case "$1" in
+    -t|--timestamp) stamp=1; shift;;
+    --) shift; while [ $# -gt 0 ]; do parts+=("$1"); shift; done; break;;
+    -)  # a lone dash → read the line(s) from stdin
+        if [ -z "$name" ]; then
+          printf "\n  ${R}usage:${X} edda add <note> -   ${DIM}(name first, then '-')${X}\n\n"; return 1
+        fi
+        from_stdin=1; shift;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$1"; shift;;
+    *) if [ -z "$name" ]; then name="$1"; else parts+=("$1"); fi; shift;;
+  esac; done
+
+  ensure_vault || return 1
+  [ -z "$name" ] && { printf "\n  ${R}usage:${X} edda add <note> [-t] '<text>'   ${DIM}or:  … | edda add <note> -${X}\n\n"; return 1; }
+  local file; file="$(note_file "$name")"
+  if [ ! -f "$file" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$(slugify "$name")"
+    note "create it first with:  edda new $name"
+    printf "\n"; return 1
+  fi
+
+  local text=""
+  if [ "$from_stdin" = 1 ]; then
+    # Guard the stdin read: refuse (don't hang) when stdin is an interactive tty.
+    if [ -t 0 ]; then
+      printf "\n  ${R}✗ nothing piped in${X} ${DIM}— 'edda add %s -' reads text from stdin.${X}\n\n" "$(slugify "$name")"; return 1
+    fi
+    text="$(cat)"
+  else
+    text="${parts[*]}"
+  fi
+  if [ -z "${text//[$' \t\n']/}" ]; then
+    printf "\n  ${R}✗ nothing to add${X} ${DIM}(empty text).${X}\n\n"; return 1
+  fi
+
+  [ "$stamp" = 1 ] && text="- $(now_iso) — $text"
+  append_to_note "$file" "$text" "$stamp" || { printf "\n  ${R}✗ couldn't write to the note.${X}\n\n"; return 1; }
+  fm_set "$file" updated "$(now_iso)"
+  printf "\n  ${G}✓ added to${X} ${BD}%s${X}\n\n" "$(slugify "$name")"
+}
+
+# append_to_note <file> <text> <is_bullet> — append a block with sane spacing: a
+# plain paragraph is separated from the preceding content by exactly one blank line;
+# a timestamped bullet stacks contiguously when the note already ends in a bullet
+# (so a journal reads as one list), otherwise it too gets a blank-line separator.
+# Rewrites through a vault-local temp so trailing blank lines never accumulate.
+append_to_note(){
+  local file="$1" text="$2" is_bullet="${3:-0}" tmp last sep
+  last="$(awk 'NF{l=$0} END{print l}' "$file")"     # last non-blank line
+  if [ "$is_bullet" = 1 ] && [[ "$last" == "- "* ]]; then sep=0; else sep=1; fi
+  tmp="$(mktemp "$VAULT/.edda-tmp.XXXXXX")" || return 1
+  {
+    # the body with any trailing blank lines trimmed …
+    awk '{ a[NR]=$0 } END { n=NR; while (n>0 && a[n]=="") n--; for (i=1;i<=n;i++) print a[i] }' "$file"
+    [ "$sep" = 1 ] && printf '\n'                    # … then one blank separator, if wanted …
+    printf '%s\n' "$text"                            # … then the new line.
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+# ── read — render a note; glow → bat → a minimal render → cat, pipe-safe ────────
+cmd_read(){
+  is_help "${1:-}" && { help_read; return 0; }
+  local raw=0 pager=1 name="" a
+  for a in "$@"; do case "$a" in
+    --raw) raw=1;;
+    --no-pager) pager=0;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+    *) [ -z "$name" ] && name="$a";;
+  esac; done
+  ensure_vault || return 1
+  [ -z "$name" ] && { printf "\n  ${R}usage:${X} edda read <note> [--raw] [--no-pager]\n\n"; return 1; }
+  local file; file="$(note_file "$name")"
+  if [ ! -f "$file" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$(slugify "$name")"
+    note "list what you have with:  edda list"
+    printf "\n"; return 1
+  fi
+
+  # --raw dumps the source verbatim (frontmatter included), for piping/scripting.
+  [ "$raw" = 1 ] && { cat "$file"; return 0; }
+
+  # Pipe-safe: no TTY or NO_COLOR → emit the plain markdown body (zero escapes), so
+  # 'edda read x | …' composes cleanly. Otherwise render through the best available.
+  if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
+    note_body "$file"; return 0
+  fi
+
+  local out; out="$(render_note "$file")"
+  # Page long output through $PAGER when it doesn't fit and paging is on.
+  local lines rows; lines="$(printf '%s\n' "$out" | wc -l)"; rows="$(tput lines 2>/dev/null || echo 40)"
+  if [ "$pager" = 1 ] && [ "$lines" -gt "$rows" ]; then
+    local -a pgr; read -r -a pgr <<< "${PAGER:-less -R}"
+    printf '%s\n' "$out" | "${pgr[@]}"
+  else
+    printf '%s\n' "$out"
+  fi
+}
+
+# render_note <file> — the rendering ladder, on the frontmatter-stripped body.
+render_note(){
+  if   have glow; then note_body "$1" | glow -s auto
+  elif have bat;  then note_body "$1" | bat -l md --style=plain --color=always
+  else                 note_body "$1" | render_min; fi
+}
+
+# render_min — the last-resort renderer: bold headings, cyan list bullets, else
+# verbatim. Only ever runs on a TTY (the pipe-safe path cats plain markdown), so
+# the color vars are live here.
+render_min(){
+  awk -v BD="$BD" -v C="$C" -v X="$X" '
+    /^#{1,6} / { t=$0; sub(/^#{1,6} /,"",t); printf "%s%s%s\n", BD, t, X; next }
+    /^[[:space:]]*[-*] / { printf "%s%s%s\n", C, $0, X; next }
+    { print }
+  '
+}
+
+# ── list — notes, newest first, optionally filtered to one label ───────────────
+cmd_list(){
+  is_help "${1:-}" && { help_list; return 0; }
+  local label=""
+  while [ $# -gt 0 ]; do case "$1" in
+    -l|--label) shift; label="${1:-}";;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$1";;
+    *) label="$1";;
+  esac; shift; done
+  ensure_vault || return 1
+  local qlabel=""; [ -n "$label" ] && qlabel="$(slugify "$label")"
+
+  # Gather rows: "updated_epoch \x1f slug \x1f title \x1f updated_iso \x1f labels".
+  local -a rows=()
+  local f slug title updated labels ep
+  shopt -s nullglob
+  for f in "$VAULT"/*.md; do
+    slug="$(basename "$f" .md)"
+    title="$(fm_get "$f" title)"; [ -z "$title" ] && title="$slug"
+    updated="$(fm_get "$f" updated)"
+    labels="$(note_labels "$f")"
+    if [ -n "$qlabel" ]; then
+      case " $labels " in *" $qlabel "*) ;; *) continue;; esac
+    fi
+    ep="$(date -d "${updated:-}" +%s 2>/dev/null || echo 0)"
+    rows+=("$ep"$'\x1f'"$slug"$'\x1f'"$title"$'\x1f'"$updated"$'\x1f'"$labels")
+  done
+  shopt -u nullglob
+
+  local suffix=""; [ -n "$qlabel" ] && suffix=" · label $qlabel"
+  printf "\n  ${BD}edda${X}  ${DIM}·  %d note%s%s${X}\n\n" "${#rows[@]}" "$([ "${#rows[@]}" = 1 ] || printf s)" "$suffix"
+  if [ "${#rows[@]}" -eq 0 ]; then
+    if [ -n "$qlabel" ]; then note "no notes labelled '$qlabel'."; else note "no notes yet — 'edda new <title>' to start."; fi
+    printf "\n"; return 0
+  fi
+
+  while IFS=$'\x1f' read -r ep slug title updated labels; do
+    local tag=""; [ -n "$labels" ] && tag="  ${DIM}[${labels// /, }]${X}"
+    printf "    ${C}%-24s${X} ${BD}%s${X}  ${DIM}· %s${X}%s\n" "$slug" "$title" "$(age_short "$updated")" "$tag"
+  done < <(printf '%s\n' "${rows[@]}" | sort -t $'\x1f' -k1,1nr)
+  printf "\n"
+}
+
+# ── search — grep the vault; rg if present, else grep -r. Pipe-safe. ───────────
+cmd_search(){
+  is_help "${1:-}" && { help_search; return 0; }
+  local a; local -a pat=()
+  for a in "$@"; do case "$a" in
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a" >&2;;
+    *) pat+=("$a");;
+  esac; done
+  ensure_vault || return 1
+  [ "${#pat[@]}" -eq 0 ] && { printf "\n  ${R}usage:${X} edda search <pattern>\n\n"; return 1; }
+  local query="${pat[*]}"
+  local color="never"; { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; } && color="always"
+
+  # rg skips hidden dirs (so .trash is already out) — the glob is belt-and-suspenders.
+  # grep -r needs the explicit --exclude-dir. Both exit 1 on "no matches" (not an error).
+  local rc=0
+  if have rg; then
+    rg --color="$color" --heading --line-number --smart-case --glob '!.trash/**' -- "$query" "$VAULT" || rc=$?
+  else
+    grep -rn --color="$color" --include='*.md' --exclude-dir='.trash' -- "$query" "$VAULT" || rc=$?
+  fi
+  case "$rc" in
+    0) return 0;;
+    1) printf "\n  ${DIM}no matches for '%s'.${X}\n\n" "$query"; return 0;;
+    *) return "$rc";;
+  esac
+}
+
+# ── path — print a note's file path (plain, for scripting: vim "$(edda path x)") ─
+cmd_path(){
+  is_help "${1:-}" && { help_path; return 0; }
+  local name="" a
+  for a in "$@"; do case "$a" in
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a" >&2;;
+    *) [ -z "$name" ] && name="$a";;
+  esac; done
+  ensure_vault || return 1
+  [ -z "$name" ] && { printf "usage: edda path <note>\n" >&2; return 1; }
+  local file; file="$(note_file "$name")"
+  [ ! -f "$file" ] && { printf "no note named %s\n" "$(slugify "$name")" >&2; return 1; }
+  printf '%s\n' "$file"
+}
+
+# ── per-command help ──────────────────────────────────────────────────────────
+help_init(){
+  printf "\n  ${BD}edda init${X} [--force]\n\n"
+  printf "  Scaffold the vault (and its ${BD}.trash/${X}) and write a starter config. Idempotent —\n"
+  printf "  safe to run again; ${BD}--force${X} overwrites an existing config.\n\n"
+  printf "  Resolves the vault the same way every command does: ${BD}EDDA_VAULT${X} env > the config\n"
+  printf "  file > the default ${DIM}(%s)${X}.\n\n" "$DEFAULT_VAULT"
+}
+help_new(){
+  printf "\n  ${BD}edda new${X} [-l label] [-e] <title…>\n\n"
+  printf "  Create a note. The title becomes both the filename ${BD}slug${X} ${DIM}(lowercased, dashed)${X} and\n"
+  printf "  the frontmatter ${BD}title:${X}. Refuses to clobber an existing note.\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    -l, --label <label>   add a label ${DIM}(repeatable)${X}\n"
+  printf "    -e, --edit            open the new note in your editor afterwards\n\n"
+  printf "  ${BD}Example${X}\n"
+  printf "    edda new -l work \"Kickoff notes\"     ${DIM}→ kickoff-notes.md${X}\n\n"
+}
+help_edit(){
+  printf "\n  ${BD}edda edit${X} <note>\n\n"
+  printf "  Open a note in your editor — ${BD}\$VISUAL${X} → ${BD}\$EDITOR${X} → nano → vi. Bumps the\n"
+  printf "  frontmatter ${BD}updated:${X} timestamp, but only if you actually changed the file.\n\n"
+}
+help_add(){
+  printf "\n  ${BD}edda add${X} <note> [-t] '<text>'\n\n"
+  printf "  Append a line to a note. Plain by default ${DIM}(one blank line keeps paragraphs apart)${X};\n"
+  printf "  with ${BD}-t${X} it prepends a ${BD}- <ISO-8601> — ${X}journal bullet that stacks into a list.\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    -t, --timestamp   make it a timestamped journal bullet\n\n"
+  printf "  ${BD}stdin${X}\n"
+  printf "    a lone ${BD}-${X} reads the text from a pipe:  ${DIM}echo 'idea' | edda add ideas -${X}\n\n"
+  printf "  ${DIM}Text that starts with a dash (a '- bullet', a '---' rule) needs the ${X}${BD}--${X}${DIM} escape:\n"
+  printf "  edda add ideas -- '---'${X}\n\n"
+}
+help_read(){
+  printf "\n  ${BD}edda read${X} <note> [--raw] [--no-pager]\n\n"
+  printf "  Render a note — ${BD}glow${X} → ${BD}bat${X} → a minimal built-in render → cat, whichever is\n"
+  printf "  present. Long notes page through ${BD}\$PAGER${X}. Piped or under ${BD}NO_COLOR${X}, it emits plain\n"
+  printf "  markdown ${DIM}(no escapes)${X} so it composes downstream.\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    --raw         dump the source verbatim ${DIM}(frontmatter included)${X}\n"
+  printf "    --no-pager    never page, even when long\n\n"
+}
+help_list(){
+  printf "\n  ${BD}edda list${X} [-l label]   ${DIM}(alias: ls)${X}\n\n"
+  printf "  List notes, newest ${BD}updated${X} first: slug, title, age, and labels. Give a label to\n"
+  printf "  filter ${DIM}(-l work, or just: edda list work)${X}.\n\n"
+}
+help_search(){
+  printf "\n  ${BD}edda search${X} <pattern>   ${DIM}(alias: grep)${X}\n\n"
+  printf "  Search note contents across the vault ${DIM}(the .trash/ is skipped)${X}. Uses ${BD}rg${X} when\n"
+  printf "  present, else ${BD}grep -r${X}. Smart-case; the pattern is a regex.\n\n"
+}
+help_path(){
+  printf "\n  ${BD}edda path${X} <note>\n\n"
+  printf "  Print a note's file path — plain, so it scripts cleanly:  ${DIM}vim \"\$(edda path todo)\"${X}.\n"
+  printf "  Exits non-zero ${DIM}(message to stderr)${X} when the note doesn't exist.\n\n"
+}
+
+# ── help — the menu ────────────────────────────────────────────────────────────
+cmd_help(){
+  printf "\n  ${BD}edda${X} ${DIM}— a pocket vault for markdown notes · v%s${X}\n\n" "$VERSION"
+  printf "  ${DIM}write${X}\n"
+  printf "    ${BD}new${X} [-l label] <title…>   create a note ${DIM}(-e also opens your editor)${X}\n"
+  printf "    ${BD}edit${X} <note>               open a note in \$EDITOR\n"
+  printf "    ${BD}add${X} <note> [-t] '<text>'  append a line ${DIM}(-t timestamps it; '-' reads stdin)${X}\n"
+  printf "  ${DIM}read${X}\n"
+  printf "    ${BD}read${X} <note> [--raw]       render a note ${DIM}(glow/bat if present)${X}\n"
+  printf "    ${BD}list${X} [-l label]           list notes, newest first ${DIM}(alias: ls)${X}\n"
+  printf "    ${BD}search${X} <pattern>          grep the vault ${DIM}(rg if present · alias: grep)${X}\n"
+  printf "    ${BD}path${X} <note>               print a note's file path\n"
+  printf "  ${DIM}setup${X}\n"
+  printf "    ${BD}init${X}                      scaffold the vault + a starter config\n"
+  printf "    ${BD}help${X} ${DIM}·${X} ${BD}version${X}          this menu · the version\n\n"
+  printf "  ${DIM}fast-path:${X} ${BD}edda <note>${X} ${DIM}with no verb reads that note, when one by that name exists.${X}\n"
+  printf "  ${DIM}vault:${X} ${C}%s${X}\n" "$VAULT"
+  printf "  ${DIM}run${X} ${BD}edda <command> help${X} ${DIM}for details on any command.${X}\n\n"
+}
+
+# ── dispatch — verbs win the first position; the bareword fast-path is the default ─
+case "${1:-}" in
+  new)                    shift; cmd_new "$@";;
+  edit)                   shift; cmd_edit "$@";;
+  add)                    shift; cmd_add "$@";;
+  read)                   shift; cmd_read "$@";;
+  list|ls)                shift; cmd_list "$@";;
+  search|grep)            shift; cmd_search "$@";;
+  path)                   shift; cmd_path "$@";;
+  init)                   shift; cmd_init "$@";;
+  help|-h|--help)         cmd_help;;
+  version|-V|--version)   printf "edda %s\n" "$VERSION";;
+  "")                     cmd_help;;
+  *)
+    # The bareword fast-path — a non-verb is accepted ONLY when it names a note that
+    # already exists (invariant: never let free text into the dispatch position).
+    # Anything else is a clean error plus the menu.
+    _slug="$(slugify "$1")"
+    if [ -n "$_slug" ] && [ -f "$VAULT/$_slug.md" ]; then
+      cmd_read "$1"
+    else
+      printf "\n  ${R}no such command or note:${X} ${BD}%s${X}\n" "$1"
+      [ -n "$_slug" ] && note "no verb '$1', and no note '$_slug' in the vault ($VAULT)."
+      cmd_help
+      exit 1
+    fi
+    ;;
+esac
