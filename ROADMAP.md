@@ -10,11 +10,13 @@ focused PR._
   `env > config > default` vault ladder, the closed frontmatter schema, verb-first grammar with the
   bareword fast-path, two-level help, a `NO_COLOR`/non-TTY-aware palette, the `shellcheck` CI gate,
   and a throwaway-vault test harness.
+- [x] **v0.1.1 — search fallback parity** · the `grep -r` fallback is now case-insensitive + extended
+  regex (`-iE`), so `search` behaves the same whether or not `rg` is installed.
+- [x] **v0.2.0 — `rm` (soft-delete)** · `edda rm <note>` moves a note to `$EDDA_VAULT/.trash/` (never
+  a hard delete), behind the `confirm()` `/dev/tty` gate or `--force`; a repeat delete of the same
+  name is timestamp-suffixed, never clobbered.
 
 ## Next
-- [ ] **`rm` — with the soft-delete contract** · `edda rm <note>` moves the file to
-  `$EDDA_VAULT/.trash/` (never a hard delete), confirming interactively (the `confirm()` `/dev/tty`
-  spine) or with `--force`. The one destructive-adjacent verb, and it ships only this way.
 - [ ] **`labels`** · list every label in use with counts; add/remove labels on a note (rewriting the
   closed `labels:` field in place, no YAML library).
 - [ ] **`mv` / `rename`** · re-slug a note and update its `title:`, keeping slug and title in sync.

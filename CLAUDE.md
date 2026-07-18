@@ -89,16 +89,17 @@ top→bottom:
   · `open_editor` (`$VISUAL`→`$EDITOR`→nano→vi) · `ensure_vault`.
 - **`cmd_*` functions** — `cmd_init` · `cmd_new` · `cmd_edit` · `cmd_add` (+ `append_to_note`, the
   blank-line/bullet-stacking logic) · `cmd_read` (+ `render_note` / `render_min`, the render ladder)
-  · `cmd_list` · `cmd_search` · `cmd_path`. Each guards `is_help` first, then a while-loop `case`
-  parses args; note-touching commands call `ensure_vault`.
+  · `cmd_list` · `cmd_search` · `cmd_path` · `cmd_rm` (+ `confirm`, vegtam's `/dev/tty` gate — the
+  soft-delete: `mv` into `.trash/`, never a hard delete). Each guards `is_help` first, then a
+  while-loop `case` parses args; note-touching commands call `ensure_vault`.
 - **`help_*` block** then **`cmd_help`** — two-level help (`edda help`, `edda <cmd> help`).
 - **The `case` dispatcher** — verbs win the first position; the **bareword fast-path is the default
   arm** (reads a note only when one by that name exists, else a clean error + the menu).
 
-Surface (v1): **`new` · `edit` · `add` · `read` · `list`/`ls` · `search`/`grep` · `path` · `init`**,
-plus `help` / `version`. Everything else (`labels`, `rm`, `mv`/`rename`, `open`, `export`, `daily`,
-`template`, links/backlinks) is **ROADMAP**, not v1 — `rm` ships only with the `.trash/` soft-delete
-contract above.
+Surface: **`new` · `edit` · `add` · `rm` · `read` · `list`/`ls` · `search`/`grep` · `path` ·
+`init`**, plus `help` / `version`. `rm` (shipped in v0.2.0) soft-deletes to `.trash/` — the contract
+above. Still **ROADMAP**: `labels`, `mv`/`rename`, `open`, `export`, `daily`, `template`,
+links/backlinks.
 
 **A note on `add` and dash-leading text.** Every `cmd_*` treats a `-*` token as an option (the house
 convention), so text that *starts* with a dash — a literal `-` bullet, a `---` rule — needs the `--`
@@ -150,20 +151,21 @@ reads only the leading block.
 
 ## Status
 
-**v0.1.0 — v1 verb surface shipped.** The `edda` script exists and implements
-`init`/`new`/`edit`/`add`/`read`/`list`/`search`/`path` + `help`/`version` behind the locked
-decisions above; `bash -n` + `shellcheck` clean. CI now runs `.github/workflows/shellcheck.yml`
+**v0.2.0 — v1 surface + `rm`, shipped.** The `edda` script implements
+`init`/`new`/`edit`/`add`/`rm`/`read`/`list`/`search`/`path` + `help`/`version` behind the locked
+decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via the `confirm()`
+`/dev/tty` gate (or `--force`), never a hard delete. CI runs `.github/workflows/shellcheck.yml`
 (the `bash -n` + `shellcheck` gate) and `.github/workflows/test.yml` (the `test/run.sh` throwaway-
-vault harness, 65 assertions). AgentGate still wired (`scope` → warning, `secrets` +
+vault harness, 72 assertions). AgentGate still wired (`scope` → warning, `secrets` +
 `dangerous_patterns` → error); edda's own code trips none of the default denylist patterns. **Do
 not spell those code tokens out in a committed file** — the rule scans added diff lines including
 prose, so naming them here would block the PR (the estate-manual quirk). Adding CI workflows also
 raises a `scope` warning (they're a denied path), and a first-cut PR this size raises a `diff_size`
 warning; both are non-blocking and expected. Docs written for adoption.
 
-Next milestone: **`rm` with the `.trash/` soft-delete contract** (the `confirm()` `/dev/tty` spine
-from vegtam), then `labels` / `mv` / `open` — see `ROADMAP.md`. When `rm` lands, add its
-`rm`-lands-in-`.trash` test to `test/run.sh`.
+Next milestone: **`labels`** (list in use + add/remove, rewriting the closed `labels:` field in
+place), then `mv`/`rename` and `open` — see `ROADMAP.md`. macOS `date` portability (dropping the
+GNU-coreutils caveat) is a separate, still-open item.
 
 ## Reference
 
