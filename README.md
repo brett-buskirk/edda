@@ -72,6 +72,9 @@ edda <cmd> help            detail & options for any command
 edda version               print the version
 ```
 
+For a one-page reference to every command, option, and behavior, see the
+[**cheat sheet**](CHEATSHEET.md).
+
 The grammar is **verb-first**. The one exception is the bareword fast-path: `edda <note>` with no
 verb reads the note — but *only* when a note by that name already exists; otherwise you get a clean
 error and the menu. Verbs always win the first position.
