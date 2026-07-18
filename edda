@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -639,6 +639,58 @@ labels_overview(){
   printf "\n  ${BD}%d label%s${X}\n\n" "${#count[@]}" "$([ "${#count[@]}" = 1 ] || printf s)"
 }
 
+# ── mv — rename a note: re-slug the file and update its title, kept in sync ──────
+cmd_mv(){
+  is_help "${1:-}" && { help_mv; return 0; }
+  local src=""; local -a rest=()
+  while [ $# -gt 0 ]; do case "$1" in
+    --) shift; while [ $# -gt 0 ]; do rest+=("$1"); shift; done; break;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$1"; shift;;
+    *) if [ -z "$src" ]; then src="$1"; else rest+=("$1"); fi; shift;;
+  esac; done
+  ensure_vault || return 1
+  local newname="${rest[*]}"
+  if [ -z "$src" ] || [ -z "${newname// /}" ]; then
+    printf "\n  ${R}usage:${X} edda mv <note> <new name…>\n\n"; return 1
+  fi
+
+  local oldslug; oldslug="$(slugify "$src")"
+  local oldfile; oldfile="$(note_file "$src")"
+  if [ ! -f "$oldfile" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$oldslug"
+    note "list what you have with:  edda list"
+    printf "\n"; return 1
+  fi
+
+  local newslug; newslug="$(slugify "$newname")"
+  if [ -z "$newslug" ]; then
+    printf "\n  ${R}✗ that new name has no slug-able characters${X} ${DIM}(need at least one a–z or 0–9).${X}\n\n"; return 1
+  fi
+
+  # Same slug → a title-only change: fix the wording/case without moving the file.
+  if [ "$newslug" = "$oldslug" ]; then
+    fm_set "$oldfile" title "$newname"
+    fm_set "$oldfile" updated "$(now_iso)"
+    printf "\n  ${G}✓ retitled${X} ${BD}%s${X} ${DIM}→ \"%s\"${X}\n\n" "$oldslug" "$newname"
+    return 0
+  fi
+
+  # Different slug → a real rename. Never overwrite a different existing note.
+  local newfile="$VAULT/$newslug.md"
+  if [ -e "$newfile" ]; then
+    printf "\n  ${Y}a note named${X} ${BD}%s${X} ${Y}already exists${X} ${DIM}→ %s${X}\n" "$newslug" "$newfile"
+    note "rm or rename that one first — edda won't overwrite a note."
+    printf "\n"; return 1
+  fi
+  if mv "$oldfile" "$newfile"; then
+    fm_set "$newfile" title "$newname"
+    fm_set "$newfile" updated "$(now_iso)"
+    printf "\n  ${G}✓ renamed${X} ${BD}%s${X} ${DIM}→${X} ${BD}%s${X} ${DIM}(title \"%s\")${X}\n\n" "$oldslug" "$newslug" "$newname"
+  else
+    printf "\n  ${R}✗ couldn't rename %s.${X}\n\n" "$oldslug"; return 1
+  fi
+}
+
 # ── per-command help ──────────────────────────────────────────────────────────
 help_init(){
   printf "\n  ${BD}edda init${X} [--force]\n\n"
@@ -722,6 +774,14 @@ help_labels(){
   printf "    edda labels retro-prep                 ${DIM}that note's labels${X}\n"
   printf "    edda labels retro-prep -a urgent -r draft\n\n"
 }
+help_mv(){
+  printf "\n  ${BD}edda mv${X} <note> <new name…>   ${DIM}(alias: rename)${X}\n\n"
+  printf "  Rename a note — re-slug the file ${BD}and${X} update its ${BD}title:${X}, kept in sync (the new name\n"
+  printf "  becomes both, like 'new'). If the new name slugs to the same filename, only the title\n"
+  printf "  changes ${DIM}(fix wording/case in place)${X}. ${BD}Never overwrites${X} a different existing note.\n\n"
+  printf "  ${BD}Example${X}\n"
+  printf "    edda mv reading-list \"Books to read\"     ${DIM}→ books-to-read.md, title \"Books to read\"${X}\n\n"
+}
 
 # ── help — the menu ────────────────────────────────────────────────────────────
 cmd_help(){
@@ -731,6 +791,7 @@ cmd_help(){
   printf "    ${BD}edit${X} <note>               open a note in \$EDITOR\n"
   printf "    ${BD}add${X} <note> [-t] '<text>'  append a line ${DIM}(-t timestamps it; '-' reads stdin)${X}\n"
   printf "    ${BD}rm${X} <note> [--force]       soft-delete a note ${DIM}(to .trash/; never a hard delete)${X}\n"
+  printf "    ${BD}mv${X} <note> <new name>      rename a note ${DIM}(re-slug + retitle; alias: rename)${X}\n"
   printf "  ${DIM}read${X}\n"
   printf "    ${BD}read${X} <note> [--raw]       render a note ${DIM}(glow/bat if present)${X}\n"
   printf "    ${BD}list${X} [-l label]           list notes, newest first ${DIM}(alias: ls)${X}\n"
@@ -751,6 +812,7 @@ case "${1:-}" in
   edit)                   shift; cmd_edit "$@";;
   add)                    shift; cmd_add "$@";;
   rm)                     shift; cmd_rm "$@";;
+  mv|rename)              shift; cmd_mv "$@";;
   read)                   shift; cmd_read "$@";;
   list|ls)                shift; cmd_list "$@";;
   search|grep)            shift; cmd_search "$@";;

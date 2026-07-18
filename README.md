@@ -64,6 +64,7 @@ edda new <title…>          create a note (-l label, -e to open your editor)
 edda edit <note>           open a note in $EDITOR
 edda add <note> [-t] '…'   append a line (-t timestamps it; '-' reads stdin)
 edda rm <note>             soft-delete a note to .trash/ (--force to skip confirm)
+edda mv <note> <new name>  rename a note — re-slug + retitle (alias: rename)
 edda read <note>           render a note (--raw for source)
 edda list [-l label]       list notes, newest first (alias: ls)
 edda labels [<note>]       labels in use + counts; -a/-r edit a note's labels
@@ -119,6 +120,18 @@ edda rm old-draft --force  # skip the prompt
 unrecoverably deletes your prose. It confirms once (reading `/dev/tty`, so a pipe can't
 auto-confirm a batch) unless you pass `--force`; a second delete of the same name is
 timestamp-suffixed rather than clobbered. Restore anytime by moving the file back out of `.trash/`.
+
+### `mv` / `rename` — re-slug and retitle in sync
+
+```sh
+edda mv reading-list "Books to read"   # → books-to-read.md, title "Books to read"
+edda rename books-to-read "Reading"    # alias
+```
+
+`mv` renames a note: the new name becomes both the filename **slug** and the frontmatter `title:`, kept
+in sync (`created` and the body are untouched). If the new name slugs to the *same* filename, only the
+title changes — handy for fixing wording or case in place. It **never overwrites** a different existing
+note; `rm` (or rename) that one first.
 
 ### `read` — render it
 
@@ -183,10 +196,10 @@ untouched.
 
 ## Status
 
-**v0.3.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
-`init`) plus `rm` (soft-delete to `.trash/`) and `labels` (view/edit tags), two-level help, a
-pipe-safe palette, and `shellcheck`- and test-gated CI, in one self-contained script. See
-[ROADMAP.md](ROADMAP.md) for what's next (`mv`/`rename`, `open`, and more) and
+**v0.4.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
+`init`) plus `rm` (soft-delete to `.trash/`), `labels` (view/edit tags), and `mv`/`rename` (re-slug +
+retitle), two-level help, a pipe-safe palette, and `shellcheck`- and test-gated CI, in one
+self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next (`open`, and more) and
 [CHANGELOG.md](CHANGELOG.md) for the record.
 
 ## License
