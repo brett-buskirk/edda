@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -386,22 +386,36 @@ cmd_read(){
     note_body "$file"; return 0
   fi
 
-  local out; out="$(render_note "$file")"
-  # Page long output through $PAGER when it doesn't fit and paging is on.
-  local lines rows; lines="$(printf '%s\n' "$out" | wc -l)"; rows="$(tput lines 2>/dev/null || echo 40)"
-  if [ "$pager" = 1 ] && [ "$lines" -gt "$rows" ]; then
-    local -a pgr; read -r -a pgr <<< "${PAGER:-less -R}"
-    printf '%s\n' "$out" | "${pgr[@]}"
-  else
-    printf '%s\n' "$out"
-  fi
+  # Render straight to stdout — never capture it first. glow (and bat, absent
+  # --color) disable styling when they detect their output isn't a terminal, so
+  # `out="$(render_note …)"` would silently strip the color. Page only when the note
+  # is taller than the screen and paging is on; each renderer pages *itself* so the
+  # color survives (glow -p, bat --paging). Length is judged from the raw body — the
+  # exact rendered height can't be measured without a capture that would kill color.
+  local rows blines page=0
+  rows="$(tput lines 2>/dev/null || echo 40)"
+  blines="$(note_body "$file" | wc -l)"
+  { [ "$pager" = 1 ] && [ "$blines" -gt "$rows" ]; } && page=1
+  render_note "$file" "$page"
 }
 
-# render_note <file> — the rendering ladder, on the frontmatter-stripped body.
+# render_note <file> <page> — the rendering ladder, on the frontmatter-stripped
+# body, written straight to stdout (so glow/bat see the TTY and colorize). When
+# <page> is 1 the renderer pages itself, keeping the color through the pager.
 render_note(){
-  if   have glow; then note_body "$1" | glow -s auto
-  elif have bat;  then note_body "$1" | bat -l md --style=plain --color=always
-  else                 note_body "$1" | render_min; fi
+  local file="$1" page="${2:-0}"
+  if have glow; then
+    if [ "$page" = 1 ]; then note_body "$file" | glow -s auto -p
+    else                     note_body "$file" | glow -s auto; fi
+  elif have bat; then
+    local pg=never; [ "$page" = 1 ] && pg=always
+    note_body "$file" | bat -l md --style=plain --color=always --paging="$pg"
+  elif [ "$page" = 1 ]; then
+    local -a pgr; read -r -a pgr <<< "${PAGER:-less -R}"
+    note_body "$file" | render_min | "${pgr[@]}"
+  else
+    note_body "$file" | render_min
+  fi
 }
 
 # render_min — the last-resort renderer: bold headings, cyan list bullets, else

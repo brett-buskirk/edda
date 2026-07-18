@@ -6,6 +6,15 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-07-18
+
+### Fixed
+- `read` now renders **straight to the terminal**, so `glow`/`bat` detect the TTY and colorize. It
+  had been capturing the renderer's output first (to measure length for paging), which makes `glow`
+  fall back to plain text — so `edda read <note>` looked like `cat`, while `edda read <note> | glow`
+  worked. Paging is now delegated to each renderer (`glow -p`, `bat --paging`) so the color survives
+  it, and note length is judged from the raw body. Covered by a regression test.
+
 ## [0.4.0] — 2026-07-18
 
 ### Added
