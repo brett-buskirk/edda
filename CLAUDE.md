@@ -154,7 +154,7 @@ reads only the leading block.
 `init`/`new`/`edit`/`add`/`read`/`list`/`search`/`path` + `help`/`version` behind the locked
 decisions above; `bash -n` + `shellcheck` clean. CI now runs `.github/workflows/shellcheck.yml`
 (the `bash -n` + `shellcheck` gate) and `.github/workflows/test.yml` (the `test/run.sh` throwaway-
-vault harness, 63 assertions). AgentGate still wired (`scope` → warning, `secrets` +
+vault harness, 65 assertions). AgentGate still wired (`scope` → warning, `secrets` +
 `dangerous_patterns` → error); edda's own code trips none of the default denylist patterns. **Do
 not spell those code tokens out in a committed file** — the rule scans added diff lines including
 prose, so naming them here would block the PR (the estate-manual quirk). Adding CI workflows also

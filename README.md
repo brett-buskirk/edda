@@ -156,7 +156,7 @@ untouched.
 
 ## Status
 
-**v0.1.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
+**v0.1.1** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
 `init`), two-level help, a pipe-safe palette, and `shellcheck`- and test-gated CI, in one
 self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next (`rm` with the soft-delete
 contract, `labels`, `mv`/`rename`, and more) and [CHANGELOG.md](CHANGELOG.md) for the record.

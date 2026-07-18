@@ -192,13 +192,13 @@ edda list work           # positional shorthand for the same filter
 
 ### `search`
 
-Search note contents across the vault (the `.trash/` is skipped). Uses `rg` when present —
-smart-case, and the pattern is a full regex — else falls back to `grep -r`, which is
-**case-sensitive** and uses basic regex (so `|` alternation only works under `rg`).
+Search note contents across the vault (the `.trash/` is skipped). Uses `rg` when present, else
+`grep -r`. Matching is **case-insensitive** and the pattern is a **regex**, either way — `rg` applies
+smart-case, so an uppercase letter in the pattern makes it case-sensitive.
 
 ```sh
 edda search parser
-edda grep "TODO|FIXME"   # alias; the alternation needs rg (the common case)
+edda grep "TODO|FIXME"   # alias; alternation works under both engines
 ```
 
 A run with no matches prints a dim note and still exits `0` (not an error).

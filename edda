@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -468,12 +468,14 @@ cmd_search(){
   local color="never"; { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; } && color="always"
 
   # rg skips hidden dirs (so .trash is already out) — the glob is belt-and-suspenders.
-  # grep -r needs the explicit --exclude-dir. Both exit 1 on "no matches" (not an error).
+  # grep -r needs the explicit --exclude-dir; -iE gives it the case-insensitive, extended-regex
+  # behavior rg has by default, so a search finds the same notes either way. rg keeps its smart-case
+  # (an uppercase letter makes it case-sensitive). Both exit 1 on "no matches" (not an error).
   local rc=0
   if have rg; then
     rg --color="$color" --heading --line-number --smart-case --glob '!.trash/**' -- "$query" "$VAULT" || rc=$?
   else
-    grep -rn --color="$color" --include='*.md' --exclude-dir='.trash' -- "$query" "$VAULT" || rc=$?
+    grep -rniE --color="$color" --include='*.md' --exclude-dir='.trash' -- "$query" "$VAULT" || rc=$?
   fi
   case "$rc" in
     0) return 0;;
@@ -548,7 +550,8 @@ help_list(){
 help_search(){
   printf "\n  ${BD}edda search${X} <pattern>   ${DIM}(alias: grep)${X}\n\n"
   printf "  Search note contents across the vault ${DIM}(the .trash/ is skipped)${X}. Uses ${BD}rg${X} when\n"
-  printf "  present, else ${BD}grep -r${X}. Smart-case; the pattern is a regex.\n\n"
+  printf "  present, else ${BD}grep -r${X}. Case-insensitive, and the pattern is a regex either way\n"
+  printf "  ${DIM}(rg uses smart-case — an uppercase letter makes it case-sensitive)${X}.\n\n"
 }
 help_path(){
   printf "\n  ${BD}edda path${X} <note>\n\n"
