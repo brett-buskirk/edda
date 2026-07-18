@@ -6,6 +6,19 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-18
+
+### Added
+- **`labels`** — with no note, list every label in use across the vault, by descending count. Given a
+  `<note>`, show its labels, or edit them with `-a/--add` and `-r/--remove` (both repeatable), which
+  rewrite the closed `labels:` field in place (slugified; a duplicate add or absent remove is a
+  no-op, and an edit bumps `updated:`). Ships with harness tests: overview counts, show, add/remove,
+  and the no-op cases.
+
+### Changed
+- `new` drops an unsluggable `-l` label value instead of writing a stray empty entry into `labels:`
+  — `new` and `labels` now share one `fmt_labels` writer for the closed `labels:` form.
+
 ## [0.2.0] — 2026-07-18
 
 ### Added

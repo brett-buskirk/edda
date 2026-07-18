@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -138,6 +138,14 @@ note_labels(){
   printf '%s' "$out"
 }
 
+# fmt_labels <label…> — render a label list to the closed frontmatter form
+# "[a, b, c]" (or "[]" when empty). The single writer of the labels: value.
+fmt_labels(){
+  local out="" l
+  for l in "$@"; do out="${out:+$out, }$l"; done
+  printf '[%s]' "$out"
+}
+
 # open_editor <file> — the delegation chain: $VISUAL → $EDITOR → nano → vi. No
 # bespoke editor; quick capture is 'add's job. $VISUAL/$EDITOR may carry flags
 # (e.g. "code --wait", "emacsclient -t"), so split on whitespace into argv.
@@ -228,16 +236,12 @@ cmd_new(){
     printf "\n"; return 1
   fi
 
-  # labels: [a, b] inline — the closed schema, hand-built, no YAML library.
-  local labelstr="[]"
-  if [ "${#labels[@]}" -gt 0 ]; then
-    local j; labelstr="["
-    for j in "${!labels[@]}"; do
-      [ "$j" -gt 0 ] && labelstr+=", "
-      labelstr+="$(slugify "${labels[$j]}")"
-    done
-    labelstr+="]"
-  fi
+  # labels: [a, b] inline — the closed schema, no YAML library. Slugify each seed
+  # label and drop any that slug to nothing, so a junk -l value can't wedge a stray
+  # empty entry into the list.
+  local -a lslugs=(); local l s
+  for l in "${labels[@]}"; do s="$(slugify "$l")"; [ -n "$s" ] && lslugs+=("$s"); done
+  local labelstr; labelstr="$(fmt_labels "${lslugs[@]}")"
 
   local ts; ts="$(now_iso)"
   {
@@ -553,6 +557,88 @@ cmd_rm(){
   fi
 }
 
+# ── labels — every label in use (with counts), or view/edit one note's labels ──
+cmd_labels(){
+  is_help "${1:-}" && { help_labels; return 0; }
+  local name=""; local -a adds=() removes=()
+  while [ $# -gt 0 ]; do case "$1" in
+    -a|--add)          shift; [ -n "${1:-}" ] && adds+=("$1");;
+    -r|--remove|--rm)  shift; [ -n "${1:-}" ] && removes+=("$1");;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$1";;
+    *) [ -z "$name" ] && name="$1";;
+  esac; shift; done
+  ensure_vault || return 1
+
+  # No note → the vault-wide overview. Mutation flags without a note is a usage error.
+  if [ -z "$name" ]; then
+    if [ "${#adds[@]}" -gt 0 ] || [ "${#removes[@]}" -gt 0 ]; then
+      printf "\n  ${R}usage:${X} edda labels <note> [-a label] [-r label]\n\n"; return 1
+    fi
+    labels_overview; return 0
+  fi
+
+  local slug; slug="$(slugify "$name")"
+  local file; file="$(note_file "$name")"
+  if [ ! -f "$file" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$slug"
+    note "list what you have with:  edda list"
+    printf "\n"; return 1
+  fi
+
+  local -a cur; read -r -a cur <<< "$(note_labels "$file")"
+
+  # No -a/-r → show the note's current labels.
+  if [ "${#adds[@]}" -eq 0 ] && [ "${#removes[@]}" -eq 0 ]; then
+    printf "\n  ${BD}%s${X}  ${DIM}·  labels${X}\n\n" "$slug"
+    if [ "${#cur[@]}" -eq 0 ]; then note "no labels — add one with:  edda labels $slug -a <label>"
+    else local l; for l in "${cur[@]}"; do printf "    ${C}%s${X}\n" "$l"; done; fi
+    printf "\n"; return 0
+  fi
+
+  # Edit: drop removals from the current set, then append new adds — dedup, order-stable.
+  # A label given to both -a and -r is removed (removals seed the drop set first).
+  declare -A drop=(); local x s
+  for x in "${removes[@]}"; do s="$(slugify "$x")"; [ -n "$s" ] && drop["$s"]=1; done
+  local -a result=(); declare -A seen=()
+  for x in "${cur[@]}"; do
+    { [ -z "$x" ] || [ -n "${drop[$x]:-}" ] || [ -n "${seen[$x]:-}" ]; } && continue
+    result+=("$x"); seen["$x"]=1
+  done
+  for x in "${adds[@]}"; do
+    s="$(slugify "$x")"
+    { [ -z "$s" ] || [ -n "${drop[$s]:-}" ] || [ -n "${seen[$s]:-}" ]; } && continue
+    result+=("$s"); seen["$s"]=1
+  done
+
+  fm_set "$file" labels "$(fmt_labels "${result[@]}")"
+  fm_set "$file" updated "$(now_iso)"
+  printf "\n  ${G}✓ labels${X} ${BD}%s${X} ${DIM}→ %s${X}\n\n" "$slug" "$(fmt_labels "${result[@]}")"
+}
+
+# labels_overview — every label across the vault, by descending use count.
+labels_overview(){
+  declare -A count=(); local f
+  shopt -s nullglob
+  for f in "$VAULT"/*.md; do
+    local -a labs; read -r -a labs <<< "$(note_labels "$f")"
+    local l; for l in "${labs[@]}"; do [ -n "$l" ] && count["$l"]=$(( ${count["$l"]:-0} + 1 )); done
+  done
+  shopt -u nullglob
+  printf "\n  ${BD}edda${X}  ${DIM}·  labels in use${X}\n\n"
+  if [ "${#count[@]}" -eq 0 ]; then
+    note "no labels yet — seed one with 'edda new -l <label>' or 'edda labels <note> -a <label>'."
+    printf "\n"; return 0
+  fi
+  # Emit "count<TAB>label", sort by count desc then name, render.
+  local k
+  for k in "${!count[@]}"; do printf '%s\t%s\n' "${count[$k]}" "$k"; done \
+    | sort -k1,1nr -k2,2 \
+    | while IFS=$'\t' read -r c name; do
+        printf "    ${C}%-24s${X} ${DIM}· %s note%s${X}\n" "$name" "$c" "$([ "$c" = 1 ] || printf s)"
+      done
+  printf "\n  ${BD}%d label%s${X}\n\n" "${#count[@]}" "$([ "${#count[@]}" = 1 ] || printf s)"
+}
+
 # ── per-command help ──────────────────────────────────────────────────────────
 help_init(){
   printf "\n  ${BD}edda init${X} [--force]\n\n"
@@ -622,6 +708,21 @@ help_rm(){
   printf "    -f, --force   skip the confirmation prompt\n\n"
 }
 
+help_labels(){
+  printf "\n  ${BD}edda labels${X} [<note> [-a label] [-r label]]\n\n"
+  printf "  With no note, list every label in use across the vault, with counts. Given a ${BD}<note>${X},\n"
+  printf "  show its labels — or edit them with ${BD}-a/--add${X} and ${BD}-r/--remove${X} (both repeatable),\n"
+  printf "  which rewrite the note's closed ${BD}labels:${X} field in place. Labels are slugified; adding a\n"
+  printf "  duplicate or removing an absent label is a no-op.\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    -a, --add <label>      add a label to the note ${DIM}(repeatable)${X}\n"
+  printf "    -r, --remove <label>   remove a label from the note ${DIM}(repeatable)${X}\n\n"
+  printf "  ${BD}Examples${X}\n"
+  printf "    edda labels                            ${DIM}every label + counts${X}\n"
+  printf "    edda labels retro-prep                 ${DIM}that note's labels${X}\n"
+  printf "    edda labels retro-prep -a urgent -r draft\n\n"
+}
+
 # ── help — the menu ────────────────────────────────────────────────────────────
 cmd_help(){
   printf "\n  ${BD}edda${X} ${DIM}— a pocket vault for markdown notes · v%s${X}\n\n" "$VERSION"
@@ -633,6 +734,7 @@ cmd_help(){
   printf "  ${DIM}read${X}\n"
   printf "    ${BD}read${X} <note> [--raw]       render a note ${DIM}(glow/bat if present)${X}\n"
   printf "    ${BD}list${X} [-l label]           list notes, newest first ${DIM}(alias: ls)${X}\n"
+  printf "    ${BD}labels${X} [<note>]           labels in use + counts ${DIM}(-a/-r edit a note's)${X}\n"
   printf "    ${BD}search${X} <pattern>          grep the vault ${DIM}(rg if present · alias: grep)${X}\n"
   printf "    ${BD}path${X} <note>               print a note's file path\n"
   printf "  ${DIM}setup${X}\n"
@@ -653,6 +755,7 @@ case "${1:-}" in
   list|ls)                shift; cmd_list "$@";;
   search|grep)            shift; cmd_search "$@";;
   path)                   shift; cmd_path "$@";;
+  labels|label)           shift; cmd_labels "$@";;
   init)                   shift; cmd_init "$@";;
   help|-h|--help)         cmd_help;;
   version|-V|--version)   printf "edda %s\n" "$VERSION";;

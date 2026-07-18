@@ -66,6 +66,7 @@ edda add <note> [-t] '…'   append a line (-t timestamps it; '-' reads stdin)
 edda rm <note>             soft-delete a note to .trash/ (--force to skip confirm)
 edda read <note>           render a note (--raw for source)
 edda list [-l label]       list notes, newest first (alias: ls)
+edda labels [<note>]       labels in use + counts; -a/-r edit a note's labels
 edda search <pattern>      grep the vault (alias: grep)
 edda path <note>           print a note's file path
 edda init                  scaffold the vault + a starter config
@@ -139,6 +140,19 @@ edda search parser       # search contents across the vault (.trash/ is skipped)
 vim "$(edda path todo)"  # print a note's path — plain, so it scripts cleanly
 ```
 
+### `labels` — view & edit tags
+
+```sh
+edda labels                          # every label in use, by descending count
+edda labels retro-prep               # one note's labels
+edda labels retro-prep -a urgent -r draft   # add 'urgent', remove 'draft'
+```
+
+With no note, `labels` lists every label across the vault with a use count. Given a `<note>`, it shows
+that note's labels, or edits them with `-a/--add` and `-r/--remove` (both repeatable) — rewriting the
+closed `labels:` field in place. Labels are slugified; adding a duplicate or removing an absent label
+is a no-op.
+
 ### `init` & configuration
 
 `edda init` scaffolds the vault (and its `.trash/`) and writes a starter config. The vault is
@@ -169,10 +183,11 @@ untouched.
 
 ## Status
 
-**v0.2.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
-`init`) plus `rm` (soft-delete to `.trash/`), two-level help, a pipe-safe palette, and `shellcheck`-
-and test-gated CI, in one self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next
-(`labels`, `mv`/`rename`, and more) and [CHANGELOG.md](CHANGELOG.md) for the record.
+**v0.3.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
+`init`) plus `rm` (soft-delete to `.trash/`) and `labels` (view/edit tags), two-level help, a
+pipe-safe palette, and `shellcheck`- and test-gated CI, in one self-contained script. See
+[ROADMAP.md](ROADMAP.md) for what's next (`mv`/`rename`, `open`, and more) and
+[CHANGELOG.md](CHANGELOG.md) for the record.
 
 ## License
 

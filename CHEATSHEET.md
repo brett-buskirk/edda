@@ -19,6 +19,7 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`rm`](#rm) | | Soft-delete a note to `.trash/` | `-f`/`--force` |
 | [`read`](#read) | | Render a note | `--raw`, `--no-pager` |
 | [`list`](#list) | `ls` | List notes, newest first | `-l`/`--label` |
+| [`labels`](#labels) | `label` | Labels in use + counts, or edit a note's | `-a`/`--add`, `-r`/`--remove` |
 | [`search`](#search) | `grep` | Search note contents | |
 | [`path`](#path) | | Print a note's file path | |
 | [`init`](#init) | | Scaffold the vault + a starter config | `-f`/`--force` |
@@ -27,7 +28,8 @@ For the narrative version see the [README](README.md); for per-command detail in
 | `version` | `-V`, `--version` | Print the version | |
 
 - **Write** commands (`new` `edit` `add` `rm`) create or change notes — and `rm` only ever
-  *soft-deletes* (to `.trash/`). **Read** commands (`read` `list` `search` `path`) never change anything.
+  *soft-deletes* (to `.trash/`). **Read** commands (`read` `list` `search` `path`) never change
+  anything; `labels` reads by default and only writes a note when given `-a`/`-r`.
 - The grammar is **verb-first**. `edda <note>` with no verb reads the note — but only when a note by
   that name already exists; otherwise you get a clean error and the menu.
 - Running `edda` with no arguments prints the help menu.
@@ -209,6 +211,25 @@ edda list work           # positional shorthand for the same filter
 | Option | Effect |
 |--------|--------|
 | `-l`, `--label <label>` | Show only notes carrying that label (a bare positional works too). |
+
+### `labels`
+
+With no note, list every label in use across the vault, by descending count. Given a `<note>`, show
+its labels — or edit them with `-a`/`-r`, which rewrite the closed `labels:` field in place.
+
+```sh
+edda labels                                 # every label in use + counts
+edda labels retro-prep                      # one note's labels
+edda labels retro-prep -a urgent -r draft   # add 'urgent', remove 'draft'
+```
+
+| Option | Effect |
+|--------|--------|
+| `-a`, `--add <label>` | Add a label to the note (repeatable). |
+| `-r`, `--remove <label>` | Remove a label from the note (repeatable). |
+
+Labels are slugified; adding a duplicate or removing an absent label is a no-op, and editing bumps the
+note's `updated:`.
 
 ### `search`
 
