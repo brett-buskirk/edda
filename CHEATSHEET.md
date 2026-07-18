@@ -17,6 +17,7 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`edit`](#edit) | | Open a note in `$EDITOR` | |
 | [`add`](#add) | | Append a line to a note | `-t`/`--timestamp`, `-` (stdin), `--` (escape) |
 | [`rm`](#rm) | | Soft-delete a note to `.trash/` | `-f`/`--force` |
+| [`mv`](#mv) | `rename` | Rename a note — re-slug + retitle | |
 | [`read`](#read) | | Render a note | `--raw`, `--no-pager` |
 | [`list`](#list) | `ls` | List notes, newest first | `-l`/`--label` |
 | [`labels`](#labels) | `label` | Labels in use + counts, or edit a note's | `-a`/`--add`, `-r`/`--remove` |
@@ -27,7 +28,7 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`help`](#help--version) | `-h`, `--help` | The command menu | |
 | `version` | `-V`, `--version` | Print the version | |
 
-- **Write** commands (`new` `edit` `add` `rm`) create or change notes — and `rm` only ever
+- **Write** commands (`new` `edit` `add` `rm` `mv`) create or change notes — and `rm` only ever
   *soft-deletes* (to `.trash/`). **Read** commands (`read` `list` `search` `path`) never change
   anything; `labels` reads by default and only writes a note when given `-a`/`-r`.
 - The grammar is **verb-first**. `edda <note>` with no verb reads the note — but only when a note by
@@ -172,6 +173,20 @@ The confirmation reads `/dev/tty` directly, so a piped/redirected stdin can't si
 pass `--force` for that. A second delete of the same name is timestamp-suffixed in `.trash/`, never
 clobbered. Restore anytime by moving the file back out of `.trash/`:
 `mv "$EDDA_VAULT/.trash/old-draft.md" "$EDDA_VAULT/"`.
+
+### `mv`
+
+Rename a note (alias: `rename`). The new name becomes **both** the filename slug and the frontmatter
+`title:`, kept in sync; `created` and the body are untouched.
+
+```sh
+edda mv reading-list "Books to read"   # → books-to-read.md, title "Books to read"
+edda rename books-to-read "Reading"    # alias
+```
+
+- If the new name slugs to the **same** filename, only the `title:` changes (fix wording/case in place).
+- **Never overwrites** a different existing note — `rm` (or rename) that one first.
+- Refuses (rc 1) on a missing source note or a new name that has no sluggable characters.
 
 ---
 

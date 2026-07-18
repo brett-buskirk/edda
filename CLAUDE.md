@@ -91,17 +91,19 @@ top→bottom:
 - **`cmd_*` functions** — `cmd_init` · `cmd_new` · `cmd_edit` · `cmd_add` (+ `append_to_note`, the
   blank-line/bullet-stacking logic) · `cmd_read` (+ `render_note` / `render_min`, the render ladder)
   · `cmd_list` · `cmd_labels` (+ `labels_overview` — vault-wide counts, or view/edit one note's tags)
-  · `cmd_search` · `cmd_path` · `cmd_rm` (+ `confirm`, vegtam's `/dev/tty` gate — the
-  soft-delete: `mv` into `.trash/`, never a hard delete). Each guards `is_help` first, then a
+  · `cmd_search` · `cmd_path` · `cmd_rm` (+ `confirm`, vegtam's `/dev/tty` gate — the soft-delete:
+  `mv` into `.trash/`, never a hard delete) · `cmd_mv` (rename: re-slug the file + sync `title:`,
+  never clobbering a different note). Each guards `is_help` first, then a
   while-loop `case` parses args; note-touching commands call `ensure_vault`.
 - **`help_*` block** then **`cmd_help`** — two-level help (`edda help`, `edda <cmd> help`).
 - **The `case` dispatcher** — verbs win the first position; the **bareword fast-path is the default
   arm** (reads a note only when one by that name exists, else a clean error + the menu).
 
-Surface: **`new` · `edit` · `add` · `rm` · `read` · `list`/`ls` · `labels`/`label` · `search`/`grep`
-· `path` · `init`**, plus `help` / `version`. `rm` (v0.2.0) soft-deletes to `.trash/` — the contract
-above; `labels` (v0.3.0) lists usage counts and edits a note's tags in place. Still **ROADMAP**:
-`mv`/`rename`, `open`, `export`, `daily`, `template`, links/backlinks.
+Surface: **`new` · `edit` · `add` · `rm` · `mv`/`rename` · `read` · `list`/`ls` · `labels`/`label` ·
+`search`/`grep` · `path` · `init`**, plus `help` / `version`. `rm` (v0.2.0) soft-deletes to `.trash/`
+— the contract above; `labels` (v0.3.0) lists usage counts and edits a note's tags in place; `mv`
+(v0.4.0) re-slugs a note and syncs its `title:`. Still **ROADMAP**: `open`, `export`, `daily`,
+`template`, links/backlinks.
 
 **A note on `add` and dash-leading text.** Every `cmd_*` treats a `-*` token as an option (the house
 convention), so text that *starts* with a dash — a literal `-` bullet, a `---` rule — needs the `--`
@@ -153,22 +155,23 @@ reads only the leading block.
 
 ## Status
 
-**v0.3.0 — v1 surface + `rm` + `labels`, shipped.** The `edda` script implements
-`init`/`new`/`edit`/`add`/`rm`/`read`/`list`/`labels`/`search`/`path` + `help`/`version` behind the
-locked decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via the
+**v0.4.0 — v1 surface + `rm` + `labels` + `mv`, shipped.** The `edda` script implements
+`init`/`new`/`edit`/`add`/`rm`/`mv`/`read`/`list`/`labels`/`search`/`path` + `help`/`version` behind
+the locked decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via the
 `confirm()` `/dev/tty` gate (or `--force`), never a hard delete; `labels` lists vault-wide usage
-counts and edits a note's tags in place. CI runs `.github/workflows/shellcheck.yml`
+counts and edits a note's tags in place; `mv`/`rename` re-slugs a note and syncs its `title:`, never
+clobbering. CI runs `.github/workflows/shellcheck.yml`
 (the `bash -n` + `shellcheck` gate) and `.github/workflows/test.yml` (the `test/run.sh` throwaway-
-vault harness, 83 assertions). AgentGate still wired (`scope` → warning, `secrets` +
+vault harness, 94 assertions). AgentGate still wired (`scope` → warning, `secrets` +
 `dangerous_patterns` → error); edda's own code trips none of the default denylist patterns. **Do
 not spell those code tokens out in a committed file** — the rule scans added diff lines including
 prose, so naming them here would block the PR (the estate-manual quirk). Adding CI workflows also
 raises a `scope` warning (they're a denied path), and a first-cut PR this size raises a `diff_size`
 warning; both are non-blocking and expected. Docs written for adoption.
 
-Next milestone: **`mv`/`rename`** (re-slug a note and update its `title:`, keeping slug and title in
-sync), then `open` — see `ROADMAP.md`. macOS `date` portability (dropping the GNU-coreutils caveat)
-is a separate, still-open item.
+Next milestone: **`open`** (hand a note to the OS opener, respecting the offline / editor-delegation
+posture) — see `ROADMAP.md`. macOS `date` portability (dropping the GNU-coreutils caveat) is a
+separate, still-open item.
 
 ## Reference
 

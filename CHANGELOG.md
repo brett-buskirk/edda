@@ -6,6 +6,15 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-18
+
+### Added
+- **`mv` / `rename`** — rename a note: the new name becomes both the filename slug and the
+  frontmatter `title:`, kept in sync (`created` and the body untouched). A new name that slugs to the
+  same filename is a title-only change in place. Never overwrites a different existing note (refuses
+  on collision), and refuses a missing source or an unsluggable new name. Ships with harness tests:
+  rename + title sync + created/body preserved, same-slug retitle, collision, and the error paths.
+
 ## [0.3.0] — 2026-07-18
 
 ### Added

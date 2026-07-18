@@ -370,6 +370,39 @@ t_labels(){
   assert_no_esc "labels overview piped: zero escapes" "$("$EDDA" labels)"
 }
 
+# ── mv/rename: re-slug + retitle in sync, same-slug retitle, collision refuse ────
+t_mv(){
+  fresh; "$EDDA" init >/dev/null
+  "$EDDA" new -l work "Reading List" >/dev/null
+  "$EDDA" add reading-list "GEB" >/dev/null
+  local created; created="$("$EDDA" read reading-list --raw | sed -n 's/^created: //p')"
+
+  # a real rename: the file moves, the title syncs, created + body are preserved
+  "$EDDA" mv reading-list "Books to read" >/dev/null
+  if [ -f "$EDDA_VAULT/reading-list.md" ]; then fail "mv moves the file off the old slug"
+  else pass "mv moves the file off the old slug"; fi
+  assert_file "mv creates the new slug"     "$EDDA_VAULT/books-to-read.md"
+  assert_eq "mv syncs the title"            "Books to read" "$("$EDDA" read books-to-read --raw | sed -n 's/^title: //p')"
+  assert_eq "mv preserves created"          "$created" "$("$EDDA" read books-to-read --raw | sed -n 's/^created: //p')"
+  assert_contains "mv preserves the body"   "$("$EDDA" read books-to-read --raw)" "GEB"
+
+  # same slug → a title-only change; the file stays put
+  "$EDDA" mv books-to-read "Books To READ" >/dev/null
+  assert_file "same-slug mv keeps the file"       "$EDDA_VAULT/books-to-read.md"
+  assert_eq "same-slug mv updates the title"      "Books To READ" "$("$EDDA" read books-to-read --raw | sed -n 's/^title: //p')"
+
+  # never overwrite a different existing note
+  "$EDDA" new "Target" >/dev/null
+  local rc; "$EDDA" mv books-to-read "Target" >/dev/null 2>&1; rc=$?
+  assert_rc "mv onto an existing note refuses" 1 "$rc"
+  if [ -f "$EDDA_VAULT/books-to-read.md" ] && [ -f "$EDDA_VAULT/target.md" ]; then pass "mv collision leaves both notes intact"
+  else fail "mv collision leaves both notes intact"; fi
+
+  # missing source, and an unsluggable new name
+  "$EDDA" mv ghost "X"  >/dev/null 2>&1; rc=$?; assert_rc "mv of a missing note is rc 1"       1 "$rc"
+  "$EDDA" mv target "!!!" >/dev/null 2>&1; rc=$?; assert_rc "mv to an unsluggable name is rc 1" 1 "$rc"
+}
+
 # ── run everything ───────────────────────────────────────────────────────────────
 printf '\nedda test harness — %s\n\n' "$EDDA"
 [ -x "$EDDA" ] || { printf 'edda not executable at %s\n' "$EDDA" >&2; exit 2; }
@@ -381,6 +414,7 @@ t_slug_edges
 t_add
 t_edit
 t_rm
+t_mv
 t_frontmatter_vs_hr
 t_list
 t_labels
