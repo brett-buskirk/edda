@@ -15,10 +15,10 @@ focused PR._
 - [x] **v0.2.0 — `rm` (soft-delete)** · `edda rm <note>` moves a note to `$EDDA_VAULT/.trash/` (never
   a hard delete), behind the `confirm()` `/dev/tty` gate or `--force`; a repeat delete of the same
   name is timestamp-suffixed, never clobbered.
+- [x] **v0.3.0 — `labels`** · `edda labels` lists every label in use with counts; `edda labels <note>
+  -a/-r` adds/removes labels, rewriting the closed `labels:` field in place (no YAML library).
 
 ## Next
-- [ ] **`labels`** · list every label in use with counts; add/remove labels on a note (rewriting the
-  closed `labels:` field in place, no YAML library).
 - [ ] **`mv` / `rename`** · re-slug a note and update its `title:`, keeping slug and title in sync.
 - [ ] **`open`** · hand a note to the OS opener (respecting the offline, editor-delegation posture).
 

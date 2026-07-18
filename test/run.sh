@@ -332,6 +332,44 @@ t_ladder(){
   assert_contains "default vault = XDG_DATA_HOME/edda" "$out" "$dh/edda"
 }
 
+# ── labels: overview counts, show, add/remove, no-ops, empty-label guard ─────────
+t_labels(){
+  fresh; "$EDDA" init >/dev/null
+  "$EDDA" new -l work -l urgent "Retro Prep" >/dev/null
+  "$EDDA" new -l work "Standup" >/dev/null
+  "$EDDA" new "Loose" >/dev/null
+
+  # overview: every label in use, with counts
+  local ov; ov="$("$EDDA" labels)"
+  assert_contains "labels overview lists a label"       "$ov" "work"
+  assert_contains "labels overview counts uses (2)"     "$ov" "2 note"
+  assert_contains "labels overview totals label count"  "$ov" "2 labels"
+
+  # show one note's labels
+  assert_contains "labels <note> shows its labels" "$("$EDDA" labels retro-prep)" "urgent"
+
+  # -a/-r rewrite the frontmatter labels: field in place
+  "$EDDA" labels retro-prep -a idea -r urgent >/dev/null
+  local lf; lf="$("$EDDA" read retro-prep --raw | sed -n 's/^labels: //p')"
+  assert_contains "labels -a adds a label"    "$lf" "idea"
+  assert_missing  "labels -r removes a label" "$lf" "urgent"
+
+  # adding a duplicate / removing an absent label are no-ops
+  "$EDDA" labels standup -a work >/dev/null
+  assert_eq "labels -a duplicate is a no-op" "[work]" "$("$EDDA" read standup --raw | sed -n 's/^labels: //p')"
+  "$EDDA" labels standup -r ghost >/dev/null
+  assert_eq "labels -r absent is a no-op"    "[work]" "$("$EDDA" read standup --raw | sed -n 's/^labels: //p')"
+
+  # a note with no labels
+  assert_contains "labels <note> with none says so" "$("$EDDA" labels loose)" "no labels"
+
+  # new -l with an unsluggable value must not wedge an empty entry into the list
+  "$EDDA" new -l '!!!' "Junk Label" >/dev/null
+  assert_eq "new drops an unsluggable label" "[]" "$("$EDDA" read junk-label --raw | sed -n 's/^labels: //p')"
+
+  assert_no_esc "labels overview piped: zero escapes" "$("$EDDA" labels)"
+}
+
 # ── run everything ───────────────────────────────────────────────────────────────
 printf '\nedda test harness — %s\n\n' "$EDDA"
 [ -x "$EDDA" ] || { printf 'edda not executable at %s\n' "$EDDA" >&2; exit 2; }
@@ -345,6 +383,7 @@ t_edit
 t_rm
 t_frontmatter_vs_hr
 t_list
+t_labels
 t_read
 t_search
 t_search_grep_fallback
