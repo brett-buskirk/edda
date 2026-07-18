@@ -23,6 +23,7 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`labels`](#labels) | `label` | Labels in use + counts, or edit a note's | `-a`/`--add`, `-r`/`--remove` |
 | [`search`](#search) | `grep` | Search note contents | |
 | [`path`](#path) | | Print a note's file path | |
+| [`backup`](#backup) | `archive` | Archive the vault to a `.tar.gz` (offline) | *(dest: dir / file / `-`)* |
 | [`init`](#init) | | Scaffold the vault + a starter config | `-f`/`--force` |
 | [`<note>`](#the-bareword-fast-path) | | *(no verb)* read a note by that name | |
 | [`help`](#help--version) | `-h`, `--help` | The command menu | |
@@ -278,8 +279,8 @@ in a script.
 
 ### `init`
 
-Scaffold the vault (and its `.trash/`, where a future `rm` will soft-delete) and write a starter
-config. Idempotent — safe to run again.
+Scaffold the vault (and its `.trash/`, where `rm` soft-deletes) and write a starter config.
+Idempotent — safe to run again.
 
 ```sh
 edda init
@@ -291,6 +292,35 @@ edda init --force        # overwrite an existing config
 | `-f`, `--force` | Overwrite an existing config file. |
 
 Scaffolds whichever vault the resolution ladder points at, and writes the config to `$EDDA_CONFIG`.
+
+### `backup`
+
+Archive the whole vault to a timestamped `.tar.gz` (alias: `archive`). edda's one write *outside* the
+vault — and it **never uploads anything itself**; getting the archive to the cloud is a separate
+tool's job (a Drive-synced folder, `rclone`, cron). Extract with `tar -xzf`.
+
+```sh
+edda backup                    # → ./edda-backup-<timestamp>.tar.gz
+edda backup ~/Drive/edda/      # into a directory (e.g. a cloud-synced folder)
+edda backup ~/backups/snap.tar.gz   # to an exact path
+edda backup -                  # stream the archive to stdout
+```
+
+| Destination | Result |
+|-------------|--------|
+| *(none)* | `./edda-backup-<timestamp>.tar.gz` in the current directory |
+| `<dir>` | the timestamped archive written into `<dir>` |
+| `<file>` | written to exactly that path |
+| `-` | the archive streamed to **stdout** (pipe it) |
+
+Never writes the archive **inside** the vault (refuses, rc 1), and errors on a missing destination
+directory. Upload recipes:
+
+```sh
+edda backup - | rclone rcat gdrive:edda-backups/vault-$(date +%F).tar.gz
+edda backup ~/backups/ && rclone copy ~/backups/ gdrive:edda-backups/
+# nightly cron: 0 2 * * *  edda backup "$HOME/Google Drive/edda-backups/"
+```
 
 ### The bareword fast-path
 

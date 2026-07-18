@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.4.1"
+VERSION="0.5.0"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -705,6 +705,68 @@ cmd_mv(){
   fi
 }
 
+# ── backup — archive the whole vault to a timestamped .tar.gz (offline) ─────────
+# edda's one sanctioned write *outside* the vault: a snapshot the user explicitly
+# asks for, written exactly where they point (a dir, a file, or stdout; default is
+# the current directory) and NEVER inside the vault. edda makes the archive and
+# stops — the upload (Drive-synced folder, rclone, cron) is a separate tool's job,
+# so edda stays fully offline. It reads the vault; it does not phone home.
+cmd_backup(){
+  is_help "${1:-}" && { help_backup; return 0; }
+  local dest="" a
+  for a in "$@"; do case "$a" in
+    -)  dest="-";;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a" >&2;;
+    *)  [ -z "$dest" ] && dest="$a";;
+  esac; done
+  ensure_vault || return 1
+
+  local ts parent base name
+  ts="$(date +%Y%m%dT%H%M%S)"
+  parent="$(dirname "$VAULT")"; base="$(basename "$VAULT")"
+  name="edda-backup-$ts.tar.gz"
+
+  # stdout stream — the whole point of the '-' form is composability
+  # (edda backup - | rclone rcat gdrive:…). Status goes to stderr so the archive on
+  # stdout stays clean.
+  if [ "$dest" = "-" ]; then
+    printf "  ${DIM}archiving vault → stdout${X}\n" >&2
+    tar -cz -C "$parent" "$base"
+    return $?
+  fi
+
+  # Resolve the output path: none → ./<name>; a directory → <dir>/<name>; else the
+  # literal path given.
+  local out
+  if   [ -z "$dest" ];  then out="$PWD/$name"
+  elif [ -d "$dest" ];  then out="${dest%/}/$name"
+  else                       out="$dest"; fi
+
+  # The output directory must exist, and must NOT be the vault (or inside it): a
+  # backup lives outside the notes it protects — no recursive archive, and the vault
+  # stays notes-only. Compare canonical paths.
+  local outdir; outdir="$(cd "$(dirname "$out")" 2>/dev/null && pwd)" || {
+    printf "\n  ${R}✗ no such directory for the backup:${X} ${DIM}%s${X}\n\n" "$(dirname "$out")"; return 1; }
+  local vault_real; vault_real="$(cd "$VAULT" && pwd)"
+  case "$outdir/" in
+    "$vault_real"/*)
+      printf "\n  ${R}✗ refusing to write a backup inside the vault${X} ${DIM}(%s)${X}\n" "$vault_real"
+      note "keep snapshots outside the notes:  edda backup ~/backups/"
+      printf "\n"; return 1;;
+  esac
+
+  if tar -czf "$out" -C "$parent" "$base"; then
+    local n sz; n="$(find "$VAULT" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+    sz="$(du -h "$out" 2>/dev/null | cut -f1 | tr -d ' ')"
+    printf "\n  ${G}✓ backed up${X} ${BD}%s note%s${X} ${DIM}→ %s${X}%s\n" \
+      "$n" "$([ "$n" = 1 ] || printf s)" "$out" "$([ -n "$sz" ] && printf " ${DIM}(%s)${X}" "$sz")"
+    note "upload it with your own tool — edda stays offline. e.g.:  rclone copy \"$out\" gdrive:edda-backups/"
+    printf "\n"
+  else
+    printf "\n  ${R}✗ backup failed.${X}\n\n" >&2; return 1
+  fi
+}
+
 # ── per-command help ──────────────────────────────────────────────────────────
 help_init(){
   printf "\n  ${BD}edda init${X} [--force]\n\n"
@@ -796,6 +858,18 @@ help_mv(){
   printf "  ${BD}Example${X}\n"
   printf "    edda mv reading-list \"Books to read\"     ${DIM}→ books-to-read.md, title \"Books to read\"${X}\n\n"
 }
+help_backup(){
+  printf "\n  ${BD}edda backup${X} [<dir>|<file>|-]\n\n"
+  printf "  Archive the whole vault to a timestamped ${BD}.tar.gz${X} — an offline snapshot you can keep,\n"
+  printf "  version, or hand to a sync tool. ${BD}edda makes the archive; it never uploads it itself${X} —\n"
+  printf "  it stays offline. The upload is your tool's job ${DIM}(a Drive-synced folder, rclone, cron)${X}.\n\n"
+  printf "  ${BD}Destination${X}\n"
+  printf "    ${DIM}(none)${X}      ./edda-backup-<timestamp>.tar.gz in the current directory\n"
+  printf "    ${BD}<dir>${X}       write the timestamped archive into <dir> ${DIM}(e.g. a Drive-synced folder)${X}\n"
+  printf "    ${BD}<file>${X}      write to exactly that path\n"
+  printf "    ${BD}-${X}           stream the archive to stdout ${DIM}(… | rclone rcat gdrive:…)${X}\n\n"
+  printf "  Never writes the archive inside the vault. See the README for upload recipes.\n\n"
+}
 
 # ── help — the menu ────────────────────────────────────────────────────────────
 cmd_help(){
@@ -814,6 +888,7 @@ cmd_help(){
   printf "    ${BD}path${X} <note>               print a note's file path\n"
   printf "  ${DIM}setup${X}\n"
   printf "    ${BD}init${X}                      scaffold the vault + a starter config\n"
+  printf "    ${BD}backup${X} [dest]             archive the vault to a .tar.gz ${DIM}(offline; you upload it)${X}\n"
   printf "    ${BD}help${X} ${DIM}·${X} ${BD}version${X}          this menu · the version\n\n"
   printf "  ${DIM}fast-path:${X} ${BD}edda <note>${X} ${DIM}with no verb reads that note, when one by that name exists.${X}\n"
   printf "  ${DIM}vault:${X} ${C}%s${X}\n" "$VAULT"
@@ -832,6 +907,7 @@ case "${1:-}" in
   search|grep)            shift; cmd_search "$@";;
   path)                   shift; cmd_path "$@";;
   labels|label)           shift; cmd_labels "$@";;
+  backup|archive)         shift; cmd_backup "$@";;
   init)                   shift; cmd_init "$@";;
   help|-h|--help)         cmd_help;;
   version|-V|--version)   printf "edda %s\n" "$VERSION";;
