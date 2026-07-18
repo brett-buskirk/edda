@@ -71,6 +71,7 @@ edda labels [<note>]       labels in use + counts; -a/-r edit a note's labels
 edda search <pattern>      grep the vault (alias: grep)
 edda path <note>           print a note's file path
 edda init                  scaffold the vault + a starter config
+edda backup [dest]         archive the vault to a .tar.gz (offline; you upload it)
 edda <note>                no verb → read that note, if it exists
 edda help                  the menu
 edda <cmd> help            detail & options for any command
@@ -176,6 +177,38 @@ resolved with the same ladder every command uses — **env > config file > defau
    `${XDG_CONFIG_HOME:-~/.config}/edda/config` — a plain sourced shell file), else
 3. the default `${XDG_DATA_HOME:-~/.local/share}/edda`.
 
+### `backup` — offline snapshots you can sync anywhere
+
+```sh
+edda backup                       # → ./edda-backup-<timestamp>.tar.gz
+edda backup ~/backups/            # write the timestamped archive into a directory
+edda backup ~/Drive/edda/         # …or straight into a cloud-synced folder
+edda backup - > vault.tar.gz      # stream the archive to stdout
+```
+
+`backup` rolls the whole vault into a timestamped `.tar.gz`. It's edda's one write *outside* the
+vault — produced only when you ask, written exactly where you point it, and never inside the vault
+(a backup doesn't live among the notes it protects). Extract it with `tar -xzf`.
+
+True to edda's **offline, always** rule, `backup` never uploads anything itself — it makes the
+archive and hands off. Getting it to Google Drive (or anywhere) is a one-liner with a tool that owns
+the network:
+
+```sh
+# 1. Point a backup at a Drive desktop-sync folder — the client uploads it for you:
+edda backup "$HOME/Google Drive/edda-backups/"
+
+# 2. Or pipe/copy it with rclone (https://rclone.org):
+edda backup - | rclone rcat gdrive:edda-backups/vault-$(date +%F).tar.gz
+edda backup ~/backups/ && rclone copy ~/backups/ gdrive:edda-backups/
+
+# 3. Or automate a nightly snapshot with cron:
+#   0 2 * * *  edda backup "$HOME/Google Drive/edda-backups/"
+```
+
+> The vault is Terraform state for your brain — treat it like an artifact with a backup story.
+> `backup` gives you the artifact; your sync tool of choice gives it a home.
+
 ### The frontmatter schema
 
 Every note opens with the same small, fixed block — the whole schema, on purpose:
@@ -196,11 +229,11 @@ untouched.
 
 ## Status
 
-**v0.4.1** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
-`init`) plus `rm` (soft-delete to `.trash/`), `labels` (view/edit tags), and `mv`/`rename` (re-slug +
-retitle), two-level help, a pipe-safe palette, and `shellcheck`- and test-gated CI, in one
-self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next (`open`, and more) and
-[CHANGELOG.md](CHANGELOG.md) for the record.
+**v0.5.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
+`init`) plus `rm` (soft-delete to `.trash/`), `labels` (view/edit tags), `mv`/`rename` (re-slug +
+retitle), and `backup` (offline `.tar.gz` snapshots), two-level help, a pipe-safe palette, and
+`shellcheck`- and test-gated CI, in one self-contained script. See [ROADMAP.md](ROADMAP.md) for
+what's next (`open`, and more) and [CHANGELOG.md](CHANGELOG.md) for the record.
 
 ## License
 

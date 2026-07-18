@@ -6,6 +6,17 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-18
+
+### Added
+- **`backup`** (alias `archive`) — roll the whole vault into a timestamped `.tar.gz` snapshot.
+  Destination is a directory (archive written inside it), an exact file path, `-` for a stream to
+  stdout, or nothing (the current directory). **Stays offline**: edda produces the archive and never
+  uploads it — the upload is delegated to a tool that owns the network (a Drive-synced folder,
+  `rclone`, cron; recipes in the README). This is edda's one sanctioned write *outside* the vault —
+  user-directed, and it refuses to write the archive *inside* the vault. Ships with harness tests:
+  recoverable contents, the stdout stream, the in-vault guard, and vault-untouched.
+
 ## [0.4.1] — 2026-07-18
 
 ### Fixed

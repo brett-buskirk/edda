@@ -421,6 +421,36 @@ t_mv(){
   "$EDDA" mv target "!!!" >/dev/null 2>&1; rc=$?; assert_rc "mv to an unsluggable name is rc 1" 1 "$rc"
 }
 
+# ── backup: offline archive, recoverable contents, stdout stream, guards ─────────
+t_backup(){
+  fresh; "$EDDA" init >/dev/null
+  "$EDDA" new "Keep Me" >/dev/null
+  "$EDDA" add keep-me "precious words" >/dev/null
+
+  # backup <dir> writes a timestamped archive whose contents are recoverable
+  local dest; dest="$(mkd)"
+  "$EDDA" backup "$dest" >/dev/null
+  local arc; arc="$(find "$dest" -name 'edda-backup-*.tar.gz' | head -1)"
+  assert_file "backup writes a timestamped .tar.gz" "$arc"
+  local x; x="$(mkd)"; tar -xzf "$arc" -C "$x" 2>/dev/null
+  assert_contains "backup archive contains the note, recoverable" "$(cat "$x"/*/keep-me.md 2>/dev/null)" "precious words"
+
+  # backup reads the vault but writes nothing into it
+  assert_missing "backup leaves the vault untouched" "$(ls -a "$EDDA_VAULT")" "edda-backup"
+
+  # the '-' form streams a valid gzip archive to stdout
+  if "$EDDA" backup - 2>/dev/null | gzip -t 2>/dev/null; then pass "backup - streams a valid gzip to stdout"
+  else fail "backup - streams a valid gzip to stdout"; fi
+
+  # refuses to write the archive inside the vault (no recursive archive)
+  local rc; "$EDDA" backup "$EDDA_VAULT" >/dev/null 2>&1; rc=$?
+  assert_rc "backup into the vault refuses" 1 "$rc"
+
+  # a non-existent destination directory is an error, not a silent miss
+  "$EDDA" backup /no/such/dir/x.tar.gz >/dev/null 2>&1; rc=$?
+  assert_rc "backup to a missing directory is rc 1" 1 "$rc"
+}
+
 # ── run everything ───────────────────────────────────────────────────────────────
 printf '\nedda test harness — %s\n\n' "$EDDA"
 [ -x "$EDDA" ] || { printf 'edda not executable at %s\n' "$EDDA" >&2; exit 2; }
@@ -442,6 +472,7 @@ t_search
 t_search_grep_fallback
 t_path
 t_bareword
+t_backup
 t_pipe_safety
 t_ladder
 

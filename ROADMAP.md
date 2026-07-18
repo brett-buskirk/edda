@@ -19,6 +19,10 @@ focused PR._
   -a/-r` adds/removes labels, rewriting the closed `labels:` field in place (no YAML library).
 - [x] **v0.4.0 — `mv` / `rename`** · re-slug a note's file and update its `title:` in sync; a
   same-slug rename is a title-only change; never overwrites a different existing note.
+- [x] **v0.4.1 — render fix** · `read` renders straight to the terminal so `glow`/`bat` colorize
+  (it had been capturing their output, which made them fall back to plain text).
+- [x] **v0.5.0 — `backup`** · archive the vault to a timestamped `.tar.gz` (dir / file / stdout).
+  Stays offline — edda makes the archive; the upload is delegated (a synced folder, `rclone`, cron).
 
 ## Next
 - [ ] **`open`** · hand a note to the OS opener (respecting the offline, editor-delegation posture).
@@ -31,8 +35,9 @@ focused PR._
 ## Out of scope (by design)
 These aren't backlog — they're deliberately not what edda is for.
 
-- **Anything networked.** No `gh`, no `curl`, no sync-over-the-wire. The vault is a plain directory;
-  point `EDDA_VAULT` at a synced/versioned dir and let that tool own the network.
+- **Anything networked.** No `gh`, no `curl`, no sync-over-the-wire, and no cloud upload baked in —
+  not even in `backup`. The vault is a plain directory; point `EDDA_VAULT` at a synced/versioned dir,
+  or hand a `backup` archive to `rclone`/a Drive folder/cron, and let *that* tool own the network.
 - **A general YAML/markdown engine.** The frontmatter schema is small and closed on purpose; edda
   will not grow arbitrary-YAML parsing.
 - **A bespoke TUI editor.** Editing delegates to `$VISUAL`/`$EDITOR`; quick capture is `add`'s job.

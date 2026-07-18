@@ -32,9 +32,15 @@ It is a **third archetype** in the collection, and the CLAUDE.md should keep it 
 Edda's whole surface mutates **one directory the user cares about deeply** — their notes. That sets
 the risk posture, and four invariants follow. They are not negotiable:
 
-1. **The vault is sacred, and bounded.** Every write lands **inside `$EDDA_VAULT`** and nowhere else.
-   `edda` never writes outside the vault, never phones home, never reads the wider filesystem for
-   anything but the note the user named.
+1. **The vault is sacred, and bounded.** Every *note and config* write lands **inside `$EDDA_VAULT`**
+   and nowhere else. `edda` never phones home, and never reads the wider filesystem for anything but
+   the note the user named. The **one** sanctioned write outside the vault is `backup`'s archive —
+   produced only on explicit request, written exactly where the user points (a dir, a file, `-` for
+   stdout, or the current directory by default), and **never inside the vault**. That's the whole
+   exception: edda still never scatters state across the filesystem, never writes a note or config
+   anywhere but the vault, and still touches no network — `backup` makes the archive and hands off;
+   the upload is a separate tool's job. *(This clause was added in v0.5.0 when `backup` shipped;
+   before that, edda wrote nothing outside the vault at all.)*
 2. **Never hard-delete.** `rm` **soft-deletes to `$EDDA_VAULT/.trash/`** — confirm interactively or
    `--force`. There is no code path in edda that calls `rm -f` on a note. The `freki` reaper instinct
    is *wrong* here; the user's prose is not cruft.
@@ -93,16 +99,19 @@ top→bottom:
   · `cmd_list` · `cmd_labels` (+ `labels_overview` — vault-wide counts, or view/edit one note's tags)
   · `cmd_search` · `cmd_path` · `cmd_rm` (+ `confirm`, vegtam's `/dev/tty` gate — the soft-delete:
   `mv` into `.trash/`, never a hard delete) · `cmd_mv` (rename: re-slug the file + sync `title:`,
-  never clobbering a different note). Each guards `is_help` first, then a
-  while-loop `case` parses args; note-touching commands call `ensure_vault`.
+  never clobbering a different note) · `cmd_backup` (tar.gz the vault to a dir/file/stdout — the one
+  write *outside* the vault; refuses to write *into* it; no network, the upload is delegated). Each
+  guards `is_help` first, then a while-loop `case` parses args; note-touching commands call
+  `ensure_vault`.
 - **`help_*` block** then **`cmd_help`** — two-level help (`edda help`, `edda <cmd> help`).
 - **The `case` dispatcher** — verbs win the first position; the **bareword fast-path is the default
   arm** (reads a note only when one by that name exists, else a clean error + the menu).
 
 Surface: **`new` · `edit` · `add` · `rm` · `mv`/`rename` · `read` · `list`/`ls` · `labels`/`label` ·
-`search`/`grep` · `path` · `init`**, plus `help` / `version`. `rm` (v0.2.0) soft-deletes to `.trash/`
-— the contract above; `labels` (v0.3.0) lists usage counts and edits a note's tags in place; `mv`
-(v0.4.0) re-slugs a note and syncs its `title:`. Still **ROADMAP**: `open`, `export`, `daily`,
+`search`/`grep` · `path` · `backup`/`archive` · `init`**, plus `help` / `version`. `rm` (v0.2.0)
+soft-deletes to `.trash/` — the contract above; `labels` (v0.3.0) lists usage counts and edits a
+note's tags in place; `mv` (v0.4.0) re-slugs a note and syncs its `title:`; `backup` (v0.5.0)
+archives the vault offline and delegates the upload. Still **ROADMAP**: `open`, `export`, `daily`,
 `template`, links/backlinks.
 
 **A note on `add` and dash-leading text.** Every `cmd_*` treats a `-*` token as an option (the house
@@ -116,7 +125,10 @@ reads only the leading block.
 - **Self-contained & zero estate-deps.** No `$HUGINN_*`, no `repos()`, no `exemptions.json`, no
   sibling-directory scanning. It must stay `curl`-one-file-into-`~/.local/bin`-and-run, like vegtam.
 - **Offline, always.** No `gh`, no `curl`, no network calls of any kind. If a feature seems to want
-  the network, it's the wrong feature for edda.
+  the network, it's the wrong feature for edda — **delegate** the network to another tool instead.
+  `backup` is the pattern: edda produces a `.tar.gz` artifact and stops; the upload (a Drive-synced
+  folder, `rclone`, cron) is the user's tool's job. edda never uploads, never authenticates, never
+  reaches the wire.
 - **Editor delegation only.** `edit` opens `$VISUAL` → `$EDITOR` → `nano` → `vi`. No custom editor —
   quick capture is `add`'s job, not a bespoke TUI's.
 - **`search` degrades.** `rg` if present, else `grep -r`. Same `have`-gated pattern as the pack's
@@ -160,14 +172,16 @@ reads only the leading block.
 
 ## Status
 
-**v0.4.1 — v1 surface + `rm` + `labels` + `mv`, shipped.** The `edda` script implements
-`init`/`new`/`edit`/`add`/`rm`/`mv`/`read`/`list`/`labels`/`search`/`path` + `help`/`version` behind
-the locked decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via the
-`confirm()` `/dev/tty` gate (or `--force`), never a hard delete; `labels` lists vault-wide usage
+**v0.5.0 — v1 surface + `rm` + `labels` + `mv` + `backup`, shipped.** The `edda` script implements
+`init`/`new`/`edit`/`add`/`rm`/`mv`/`read`/`list`/`labels`/`search`/`path`/`backup` + `help`/`version`
+behind the locked decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via
+the `confirm()` `/dev/tty` gate (or `--force`), never a hard delete; `labels` lists vault-wide usage
 counts and edits a note's tags in place; `mv`/`rename` re-slugs a note and syncs its `title:`, never
-clobbering. CI runs `.github/workflows/shellcheck.yml`
+clobbering; `backup` archives the vault to a `.tar.gz` (dir/file/stdout) and stays offline — the
+upload is delegated (see invariant #1's carve-out for the one write outside the vault). CI runs
+`.github/workflows/shellcheck.yml`
 (the `bash -n` + `shellcheck` gate) and `.github/workflows/test.yml` (the `test/run.sh` throwaway-
-vault harness, 95 assertions). AgentGate still wired (`scope` → warning, `secrets` +
+vault harness, 101 assertions). AgentGate still wired (`scope` → warning, `secrets` +
 `dangerous_patterns` → error); edda's own code trips none of the default denylist patterns. **Do
 not spell those code tokens out in a committed file** — the rule scans added diff lines including
 prose, so naming them here would block the PR (the estate-manual quirk). Adding CI workflows also
