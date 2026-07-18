@@ -6,6 +6,15 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-18
+
+### Added
+- **`rm`** — soft-delete a note to `$EDDA_VAULT/.trash/`, **never a hard delete**. Confirms once via
+  vegtam's `/dev/tty` `confirm()` gate (so a piped stdin can't auto-confirm) or `--force` to skip. A
+  second delete of the same name is timestamp-suffixed rather than clobbered; restore by moving the
+  file back out of `.trash/`. Ships with harness tests: lands-in-`.trash`, the `/dev/tty` safety
+  gate, missing-note, and no-clobber.
+
 ## [0.1.1] — 2026-07-18
 
 ### Changed

@@ -16,6 +16,7 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`new`](#new) | | Create a note | `-l`/`--label`, `-e`/`--edit` |
 | [`edit`](#edit) | | Open a note in `$EDITOR` | |
 | [`add`](#add) | | Append a line to a note | `-t`/`--timestamp`, `-` (stdin), `--` (escape) |
+| [`rm`](#rm) | | Soft-delete a note to `.trash/` | `-f`/`--force` |
 | [`read`](#read) | | Render a note | `--raw`, `--no-pager` |
 | [`list`](#list) | `ls` | List notes, newest first | `-l`/`--label` |
 | [`search`](#search) | `grep` | Search note contents | |
@@ -25,8 +26,8 @@ For the narrative version see the [README](README.md); for per-command detail in
 | [`help`](#help--version) | `-h`, `--help` | The command menu | |
 | `version` | `-V`, `--version` | Print the version | |
 
-- **Write** commands (`new` `edit` `add`) create or change notes. **Read** commands (`read` `list`
-  `search` `path`) never change anything.
+- **Write** commands (`new` `edit` `add` `rm`) create or change notes — and `rm` only ever
+  *soft-deletes* (to `.trash/`). **Read** commands (`read` `list` `search` `path`) never change anything.
 - The grammar is **verb-first**. `edda <note>` with no verb reads the note — but only when a note by
   that name already exists; otherwise you get a clean error and the menu.
 - Running `edda` with no arguments prints the help menu.
@@ -150,6 +151,25 @@ edda add notes -- "-> a line starting with a dash"   # -- escapes dash-leading t
 
 Plain `add` separates the new line from prior content with one blank line so paragraphs don't run
 together. The note's `updated:` is bumped on every add.
+
+### `rm`
+
+**Soft-delete** a note — it moves to `$EDDA_VAULT/.trash/`, never an unrecoverable delete. There is
+no code path in edda that hard-deletes your prose.
+
+```sh
+edda rm old-draft          # confirms, then moves it to .trash/
+edda rm old-draft --force  # skip the prompt
+```
+
+| Option | Effect |
+|--------|--------|
+| `-f`, `--force` | Skip the confirmation prompt. |
+
+The confirmation reads `/dev/tty` directly, so a piped/redirected stdin can't silently auto-confirm —
+pass `--force` for that. A second delete of the same name is timestamp-suffixed in `.trash/`, never
+clobbered. Restore anytime by moving the file back out of `.trash/`:
+`mv "$EDDA_VAULT/.trash/old-draft.md" "$EDDA_VAULT/"`.
 
 ---
 

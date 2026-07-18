@@ -21,7 +21,7 @@
 # shellcheck disable=SC2059  # color vars are fixed ANSI codes, deliberately embedded in format strings
 set -uo pipefail
 
-VERSION="0.1.1"
+VERSION="0.2.0"
 
 # ── configuration — env  >  config file  >  default vault ─────────────────────
 # The muninn ladder: capture the EDDA_VAULT env override *before* sourcing the
@@ -499,6 +499,60 @@ cmd_path(){
   printf '%s\n' "$file"
 }
 
+# confirm <question> — ask once, reading /dev/tty directly so a piped/redirected
+# stdin can't silently auto-confirm a delete. Probe that /dev/tty can actually be
+# OPENED (in some sandboxes the node exists but opening it fails), and never leave
+# reply unset under `set -u`. vegtam's spine — the safety gate for rm. Returns 0 to
+# proceed, 1 to abort.
+confirm(){
+  local reply=""
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    printf "  ${Y}no usable terminal for confirmation — pass --force to proceed non-interactively.${X}\n" >&2
+    return 1
+  fi
+  printf "  ${Y}%s${X} ${DIM}[y/N]${X} " "$1" > /dev/tty 2>/dev/null
+  read -r reply < /dev/tty 2>/dev/null || reply=""
+  case "$reply" in y|Y|yes|YES) return 0;; *) return 1;; esac
+}
+
+# ── rm — soft-delete a note to $EDDA_VAULT/.trash/ (never a hard delete) ────────
+cmd_rm(){
+  is_help "${1:-}" && { help_rm; return 0; }
+  local force=0 name="" a
+  for a in "$@"; do case "$a" in
+    -f|--force|-y|--yes) force=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+    *) [ -z "$name" ] && name="$a";;
+  esac; done
+  ensure_vault || return 1
+  [ -z "$name" ] && { printf "\n  ${R}usage:${X} edda rm <note> [--force]\n\n"; return 1; }
+  local slug; slug="$(slugify "$name")"
+  local file; file="$(note_file "$name")"
+  if [ ! -f "$file" ]; then
+    printf "\n  ${R}✗ no note named${X} ${BD}%s${X}\n" "$slug"
+    note "list what you have with:  edda list"
+    printf "\n"; return 1
+  fi
+
+  # The one destructive-adjacent verb — and it is NEVER a hard delete. Confirm once
+  # (unless --force), then MOVE the note into .trash/. No code path here removes a note.
+  if [ "$force" != 1 ] && ! confirm "move '$slug' to the trash?"; then
+    printf "  ${DIM}aborted — nothing removed.${X}\n\n"; return 0
+  fi
+  mkdir -p "$TRASH"
+  # Don't clobber a previously-trashed note of the same name — the user's prose is
+  # not cruft, so a second delete gets a timestamp suffix instead of overwriting.
+  local dest="$TRASH/$slug.md"
+  [ -e "$dest" ] && dest="$TRASH/$slug.$(date +%Y%m%dT%H%M%S).md"
+  if mv "$file" "$dest"; then
+    printf "\n  ${G}✓ moved to trash${X} ${BD}%s${X} ${DIM}→ %s${X}\n" "$slug" "$dest"
+    note "restore it with:  mv \"$dest\" \"$file\""
+    printf "\n"
+  else
+    printf "\n  ${R}✗ couldn't move %s to the trash.${X}\n\n" "$slug"; return 1
+  fi
+}
+
 # ── per-command help ──────────────────────────────────────────────────────────
 help_init(){
   printf "\n  ${BD}edda init${X} [--force]\n\n"
@@ -558,6 +612,15 @@ help_path(){
   printf "  Print a note's file path — plain, so it scripts cleanly:  ${DIM}vim \"\$(edda path todo)\"${X}.\n"
   printf "  Exits non-zero ${DIM}(message to stderr)${X} when the note doesn't exist.\n\n"
 }
+help_rm(){
+  printf "\n  ${BD}edda rm${X} <note> [--force]\n\n"
+  printf "  ${BD}Soft-delete${X} a note — it moves to ${BD}\$EDDA_VAULT/.trash/${X}, never an unrecoverable\n"
+  printf "  delete. Confirms once ${DIM}(reading /dev/tty, so a pipe can't auto-confirm)${X}; ${BD}--force${X}\n"
+  printf "  skips the prompt. A second delete of the same name is timestamp-suffixed, never clobbered.\n"
+  printf "  Restore by moving the file back out of ${BD}.trash/${X}.\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    -f, --force   skip the confirmation prompt\n\n"
+}
 
 # ── help — the menu ────────────────────────────────────────────────────────────
 cmd_help(){
@@ -566,6 +629,7 @@ cmd_help(){
   printf "    ${BD}new${X} [-l label] <title…>   create a note ${DIM}(-e also opens your editor)${X}\n"
   printf "    ${BD}edit${X} <note>               open a note in \$EDITOR\n"
   printf "    ${BD}add${X} <note> [-t] '<text>'  append a line ${DIM}(-t timestamps it; '-' reads stdin)${X}\n"
+  printf "    ${BD}rm${X} <note> [--force]       soft-delete a note ${DIM}(to .trash/; never a hard delete)${X}\n"
   printf "  ${DIM}read${X}\n"
   printf "    ${BD}read${X} <note> [--raw]       render a note ${DIM}(glow/bat if present)${X}\n"
   printf "    ${BD}list${X} [-l label]           list notes, newest first ${DIM}(alias: ls)${X}\n"
@@ -584,6 +648,7 @@ case "${1:-}" in
   new)                    shift; cmd_new "$@";;
   edit)                   shift; cmd_edit "$@";;
   add)                    shift; cmd_add "$@";;
+  rm)                     shift; cmd_rm "$@";;
   read)                   shift; cmd_read "$@";;
   list|ls)                shift; cmd_list "$@";;
   search|grep)            shift; cmd_search "$@";;

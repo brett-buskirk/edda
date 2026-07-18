@@ -157,6 +157,41 @@ t_edit(){
   assert_contains "multi-word EDITOR is split into argv" "$(cat "$EDDA_VAULT/multi.md")" "edited by the fake editor"
 }
 
+# ── rm: soft-delete to .trash/, the confirm gate, and no-clobber ─────────────────
+t_rm(){
+  fresh; "$EDDA" init >/dev/null; "$EDDA" new "Doomed" >/dev/null
+
+  # --force soft-deletes: gone from the vault, present (and intact) in .trash/
+  "$EDDA" rm doomed --force >/dev/null
+  if [ -f "$EDDA_VAULT/doomed.md" ]; then fail "rm --force removes the note from the vault"
+  else pass "rm --force removes the note from the vault"; fi
+  assert_file "rm --force lands the note in .trash/" "$EDDA_VAULT/.trash/doomed.md"
+  assert_contains "trashed note is intact (recoverable)" "$(cat "$EDDA_VAULT/.trash/doomed.md")" "# Doomed"
+
+  # the /dev/tty safety gate: without --force and no usable terminal, it aborts and
+  # the note stays. setsid detaches the controlling tty so this can't block on a real
+  # terminal when the suite is run interactively.
+  "$EDDA" new "Kept" >/dev/null
+  if command -v setsid >/dev/null 2>&1; then
+    local rc; setsid "$EDDA" rm kept </dev/null >/dev/null 2>&1; rc=$?
+    assert_rc "rm without --force + no tty aborts (rc 0)" 0 "$rc"
+    assert_file "rm safety gate leaves the note in place" "$EDDA_VAULT/kept.md"
+  else
+    skip "rm without --force + no tty aborts (rc 0)" "no setsid"
+    skip "rm safety gate leaves the note in place" "no setsid"
+  fi
+
+  # missing note → rc 1
+  local rc2; "$EDDA" rm ghost --force >/dev/null 2>&1; rc2=$?
+  assert_rc "rm of a missing note is rc 1" 1 "$rc2"
+
+  # never clobber: a second delete of the same name is timestamp-suffixed, not overwritten
+  "$EDDA" new "Dup" >/dev/null; "$EDDA" rm dup --force >/dev/null
+  "$EDDA" new "Dup" >/dev/null; "$EDDA" rm dup --force >/dev/null
+  local n; n="$(find "$EDDA_VAULT/.trash" -name 'dup*.md' | wc -l | tr -d '[:space:]')"
+  assert_eq "trash keeps both same-named deletes (no clobber)" "2" "$n"
+}
+
 # ── frontmatter vs. a body horizontal rule (the core gotcha) ─────────────────────
 t_frontmatter_vs_hr(){
   fresh; "$EDDA" init >/dev/null; "$EDDA" new "Ruled" >/dev/null
@@ -307,6 +342,7 @@ t_new_labels
 t_slug_edges
 t_add
 t_edit
+t_rm
 t_frontmatter_vs_hr
 t_list
 t_read

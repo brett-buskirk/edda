@@ -25,8 +25,8 @@ posture, and four rules hold throughout. They are not negotiable:
 
 - **Every write lands inside the vault.** `edda` never writes outside `$EDDA_VAULT`, never reads the
   wider filesystem for anything but the note you named, and never phones home.
-- **Nothing is ever hard-deleted.** (When `rm` lands, it soft-deletes to `$EDDA_VAULT/.trash/` —
-  never an unrecoverable delete of your prose.)
+- **Nothing is ever hard-deleted.** `edda rm` soft-deletes to `$EDDA_VAULT/.trash/` — never an
+  unrecoverable delete of your prose. Restore a note by moving it back out.
 - **A small, closed frontmatter schema.** Just `title` / `created` / `updated` / `labels`, read and
   written with `sed`/`awk`. `edda` is a note tool, not a general YAML engine.
 - **Offline, always.** No `gh`, no `curl`, no network calls of any kind.
@@ -63,6 +63,7 @@ speeds up `search` (else `grep`).
 edda new <title…>          create a note (-l label, -e to open your editor)
 edda edit <note>           open a note in $EDITOR
 edda add <note> [-t] '…'   append a line (-t timestamps it; '-' reads stdin)
+edda rm <note>             soft-delete a note to .trash/ (--force to skip confirm)
 edda read <note>           render a note (--raw for source)
 edda list [-l label]       list notes, newest first (alias: ls)
 edda search <pattern>      grep the vault (alias: grep)
@@ -105,6 +106,18 @@ Plain `add` appends the line as a paragraph, with a blank line so paragraphs don
 `-t` prepends a `- <ISO-8601> — ` bullet, and consecutive timestamped adds stack into one list — a
 running journal. A lone `-` reads from stdin (and refuses, rather than hangs, when nothing is piped).
 Text that *starts* with a dash needs the `--` escape: `edda add ideas -- "-> arrow"`.
+
+### `rm` — soft-delete, never a hard delete
+
+```sh
+edda rm old-draft          # confirms, then moves it to $EDDA_VAULT/.trash/
+edda rm old-draft --force  # skip the prompt
+```
+
+`rm` **moves** the note into `$EDDA_VAULT/.trash/` — there is no code path in edda that
+unrecoverably deletes your prose. It confirms once (reading `/dev/tty`, so a pipe can't
+auto-confirm a batch) unless you pass `--force`; a second delete of the same name is
+timestamp-suffixed rather than clobbered. Restore anytime by moving the file back out of `.trash/`.
 
 ### `read` — render it
 
@@ -156,10 +169,10 @@ untouched.
 
 ## Status
 
-**v0.1.1** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
-`init`), two-level help, a pipe-safe palette, and `shellcheck`- and test-gated CI, in one
-self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next (`rm` with the soft-delete
-contract, `labels`, `mv`/`rename`, and more) and [CHANGELOG.md](CHANGELOG.md) for the record.
+**v0.2.0** — the v1 verb surface (`new` · `edit` · `add` · `read` · `list` · `search` · `path` ·
+`init`) plus `rm` (soft-delete to `.trash/`), two-level help, a pipe-safe palette, and `shellcheck`-
+and test-gated CI, in one self-contained script. See [ROADMAP.md](ROADMAP.md) for what's next
+(`labels`, `mv`/`rename`, and more) and [CHANGELOG.md](CHANGELOG.md) for the record.
 
 ## License
 
