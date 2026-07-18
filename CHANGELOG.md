@@ -6,6 +6,13 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-07-18
+
+### Changed
+- `search`'s `grep -r` fallback (used when `rg` isn't installed) is now case-insensitive and uses
+  extended regex (`-iE`), matching `rg`'s default behavior — so a search finds the same notes whether
+  or not `rg` is present, and `|` alternation works either way. (`rg` keeps its smart-case default.)
+
 ## [0.1.0] — 2026-07-18
 
 ### Added

@@ -234,8 +234,14 @@ t_search_grep_fallback(){
   local d; d="$(shim_path "rg")"        # everyday tools, but no rg
   if PATH="$d" command -v rg >/dev/null 2>&1; then
     skip "search falls back to grep -r" "rg still visible"
+    skip "grep fallback is case-insensitive" "rg still visible"
+    skip "grep fallback supports regex alternation" "rg still visible"
   else
-    assert_contains "search falls back to grep -r" "$(PATH="$d" "$EDDA" search findable)" "findable"
+    assert_contains "search falls back to grep -r"                "$(PATH="$d" "$EDDA" search findable)" "findable"
+    # parity with rg: the grep fallback matches case-insensitively (-i) …
+    assert_contains "grep fallback is case-insensitive"           "$(PATH="$d" "$EDDA" search FINDABLE)" "findable"
+    # … and understands extended regex, so '|' alternation works (-E)
+    assert_contains "grep fallback supports regex alternation"    "$(PATH="$d" "$EDDA" search 'findable|absent')" "findable"
   fi
 }
 
