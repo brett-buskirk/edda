@@ -29,10 +29,10 @@ All notable changes to edda are documented here. The format is based on
     two-level help, and a `NO_COLOR`/non-TTY-aware palette.
   - Vault + config resolution on the `env > config file > default` ladder.
 - `.github/workflows/shellcheck.yml` — the `bash -n` + `shellcheck` CI gate the pack runs.
-- `.github/workflows/test.yml` and `test/run.sh` — a throwaway-vault test harness (58 assertions)
-  covering creation + frontmatter, label filtering, `add`/`-t`/stdin, slug edge cases,
-  frontmatter-vs-horizontal-rule, pipe-safety (zero escapes), the render fallback, and the vault
-  resolution ladder.
+- `.github/workflows/test.yml` and `test/run.sh` — a throwaway-vault test harness (63 assertions)
+  covering creation + frontmatter, label filtering, `add`/`-t`/stdin, slug edge cases, `edit`'s
+  `updated`-bump + multi-word `$EDITOR`, frontmatter-vs-horizontal-rule, pipe-safety (zero escapes),
+  the render and `grep` fallbacks, and the vault resolution ladder.
 - README rewritten for adoption; ROADMAP populated with the shipped milestone and what's next.
 
 ### Notes

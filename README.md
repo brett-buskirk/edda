@@ -50,10 +50,12 @@ chmod +x ~/.local/bin/edda
 edda init
 ```
 
-**Requires** `bash` and coreutils — macOS, Linux, and WSL/Git Bash on Windows. Everything else is
-optional and degrades gracefully: [`glow`](https://github.com/charmbracelet/glow) or
-[`bat`](https://github.com/sharkdp/bat) pretty-render `read` (else a plain fallback), and
-[`rg`](https://github.com/BurntSushi/ripgrep) speeds up `search` (else `grep`).
+**Requires** `bash` and **GNU** coreutils — the timestamps use GNU `date` (`-d`, `%:z`). Linux and
+WSL/Git Bash on Windows have these built in; on macOS, install GNU coreutils (`brew install
+coreutils`) and put them on your `PATH`. Everything else is optional and degrades gracefully:
+[`glow`](https://github.com/charmbracelet/glow) or [`bat`](https://github.com/sharkdp/bat)
+pretty-render `read` (else a plain fallback), and [`rg`](https://github.com/BurntSushi/ripgrep)
+speeds up `search` (else `grep`).
 
 ## Usage
 
