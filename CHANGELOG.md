@@ -6,5 +6,35 @@ All notable changes to edda are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-07-18
+
 ### Added
-- Initial scaffold.
+- The `edda` script — one self-contained Bash file (`set -uo pipefail`) implementing the v1 verb
+  surface behind the locked design decisions:
+  - **`init`** — scaffold the vault (+ `.trash/`) and a starter config.
+  - **`new`** — create a note with the closed frontmatter schema (`title` / `created` / `updated` /
+    `labels`); `-l/--label` to seed labels, `-e/--edit` to open it afterwards. Refuses to clobber.
+  - **`edit`** — open a note in `$VISUAL` → `$EDITOR` → `nano` → `vi`, bumping `updated:` only when
+    the file actually changed.
+  - **`add`** — append a line: plain by default (blank-line-separated), `-t/--timestamp` for a
+    journal bullet that stacks contiguously, and a lone `-` to read from stdin (guarded against
+    hanging on a tty).
+  - **`read`** — render through `glow` → `bat` → a minimal built-in render → `cat`, paging long
+    notes through `$PAGER`; `--raw` dumps source, `--no-pager` skips paging. Pipe-safe: plain
+    markdown with zero escapes when piped or under `NO_COLOR`.
+  - **`list`/`ls`** — notes newest-`updated` first, with `-l/--label` (or positional) filtering.
+  - **`search`/`grep`** — search the vault with `rg` when present, else `grep -r`; skips `.trash/`.
+  - **`path`** — print a note's file path (plain, for scripting).
+  - Verb-first grammar with the **bareword fast-path** (`edda <note>` reads an existing note),
+    two-level help, and a `NO_COLOR`/non-TTY-aware palette.
+  - Vault + config resolution on the `env > config file > default` ladder.
+- `.github/workflows/shellcheck.yml` — the `bash -n` + `shellcheck` CI gate the pack runs.
+- `.github/workflows/test.yml` and `test/run.sh` — a throwaway-vault test harness (58 assertions)
+  covering creation + frontmatter, label filtering, `add`/`-t`/stdin, slug edge cases,
+  frontmatter-vs-horizontal-rule, pipe-safety (zero escapes), the render fallback, and the vault
+  resolution ladder.
+- README rewritten for adoption; ROADMAP populated with the shipped milestone and what's next.
+
+### Notes
+- `rm` is intentionally **not** in v1 — it ships in a later milestone, and only with the
+  `.trash/` soft-delete contract (never a hard delete). See [ROADMAP.md](ROADMAP.md).
