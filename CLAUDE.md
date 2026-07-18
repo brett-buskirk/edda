@@ -135,6 +135,11 @@ reads only the leading block.
   it consistent.
 - **Pipe-safety hides regressions.** A test must assert **zero escape bytes** when `read`/`list` is
   piped or `NO_COLOR` is set; otherwise a stray color leak passes silently.
+- **Never capture the renderer's output.** `glow` (and `bat`, absent `--color`) drop styling when
+  their stdout isn't a terminal, so `out="$(render_note …)"` silently strips the color and `read`
+  prints plain text on a real TTY (the v0.4.1 bug). Render **straight to stdout**; judge paging from
+  the raw body length and let each renderer page itself (`glow -p`, `bat --paging`). The regression
+  test stands in a fake `glow` that reports whether its stdout is a TTY.
 - **`/dev/tty` can exist yet not be openable** (sandboxes). Reuse vegtam's `confirm()` spine — probe
   with `{ : < /dev/tty; }`, never leave `reply` unset under `set -u`. That's `rm`'s safety gate.
 - **`add -` (stdin) must detect a pipe.** Guard the stdin read so it doesn't block on an interactive
@@ -155,14 +160,14 @@ reads only the leading block.
 
 ## Status
 
-**v0.4.0 — v1 surface + `rm` + `labels` + `mv`, shipped.** The `edda` script implements
+**v0.4.1 — v1 surface + `rm` + `labels` + `mv`, shipped.** The `edda` script implements
 `init`/`new`/`edit`/`add`/`rm`/`mv`/`read`/`list`/`labels`/`search`/`path` + `help`/`version` behind
 the locked decisions above; `bash -n` + `shellcheck` clean. `rm` soft-deletes to `.trash/` via the
 `confirm()` `/dev/tty` gate (or `--force`), never a hard delete; `labels` lists vault-wide usage
 counts and edits a note's tags in place; `mv`/`rename` re-slugs a note and syncs its `title:`, never
 clobbering. CI runs `.github/workflows/shellcheck.yml`
 (the `bash -n` + `shellcheck` gate) and `.github/workflows/test.yml` (the `test/run.sh` throwaway-
-vault harness, 94 assertions). AgentGate still wired (`scope` → warning, `secrets` +
+vault harness, 95 assertions). AgentGate still wired (`scope` → warning, `secrets` +
 `dangerous_patterns` → error); edda's own code trips none of the default denylist patterns. **Do
 not spell those code tokens out in a committed file** — the rule scans added diff lines including
 prose, so naming them here would block the PR (the estate-manual quirk). Adding CI workflows also

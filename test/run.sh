@@ -252,6 +252,24 @@ t_read(){
   fi
 }
 
+# ── read renders straight to the terminal (renderer output is never captured) ───
+# Regression: capturing glow's output first made it drop color, so 'edda read' on a
+# real terminal printed plain text. Prove edda lets the renderer write to the TTY by
+# standing in a fake 'glow' that reports whether ITS stdout is a terminal.
+t_read_direct(){
+  fresh; "$EDDA" init >/dev/null; "$EDDA" new "Direct" >/dev/null; "$EDDA" add direct "body" >/dev/null
+  if ! command -v script >/dev/null 2>&1; then
+    skip "read lets the renderer write to the TTY (not captured)" "no script"; return
+  fi
+  local d; d="$(shim_path "glow bat")"          # everyday tools, but no real glow/bat
+  { printf '#!/usr/bin/env bash\n'; printf 'if [ -t 1 ]; then echo GLOW_TTY; else echo GLOW_PIPE; fi\n'; printf 'cat\n'; } > "$d/glow"
+  chmod +x "$d/glow"
+  local out
+  out="$(script -qec "PATH='$d' EDDA_VAULT='$EDDA_VAULT' EDDA_CONFIG='$EDDA_CONFIG' '$EDDA' read direct --no-pager" /dev/null 2>/dev/null | tr -d '\r')"
+  if [ -z "$out" ]; then skip "read lets the renderer write to the TTY (not captured)" "no usable pty"
+  else assert_contains "read lets the renderer write to the TTY (not captured)" "$out" "GLOW_TTY"; fi
+}
+
 # ── search ───────────────────────────────────────────────────────────────────────
 t_search(){
   fresh; "$EDDA" init >/dev/null; "$EDDA" new "Searchable" >/dev/null
@@ -419,6 +437,7 @@ t_frontmatter_vs_hr
 t_list
 t_labels
 t_read
+t_read_direct
 t_search
 t_search_grep_fallback
 t_path
