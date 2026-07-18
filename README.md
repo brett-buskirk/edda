@@ -1,0 +1,3 @@
+# edda
+
+CLI notetaking log
